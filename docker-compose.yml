@@ -21,6 +21,8 @@ services:
       DATABASE_URL: ${DATABASE_URL}
     ports:
       - '8001:8000'
+    devices:
+      - "/dev/ttyUSB0:/dev/ttyUSB0"
     volumes:
       - ./backend:/app
 
