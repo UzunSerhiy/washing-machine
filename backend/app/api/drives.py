@@ -1,7 +1,12 @@
 from fastapi import APIRouter, HTTPException
 
+from app.services import drive_service
 from app.services.drives.service import DriveService
 from app.schemas.drive import DriveFrequencyRequest
+from app.schemas.drive import (
+    DriveFrequencyRequest,
+    DriveResponse,
+)
 
 router = APIRouter(
     prefix="/api/drives",
@@ -13,6 +18,30 @@ def get_drive_service() -> DriveService:
     from app.main import drive_service
 
     return drive_service
+
+
+@router.get("", response_model=list[DriveResponse])
+def get_drives():
+    drive_service = get_drive_service()
+
+    result = []
+
+    for drive_id, drive in drive_service.drives.items():
+        result.append(
+            DriveResponse(
+                id=drive_id,
+                name=f"Drive {drive_id}",
+                address=drive.device_id,
+                type="UNKNOWN",
+                position=None,
+                enable=True,
+                status=drive.get_status(),
+                frequency_hz=drive.get_frequency(),
+                fault=drive.get_fault(),
+            )
+        )
+
+    return result
 
 
 @router.get("/{drive_id}/status")

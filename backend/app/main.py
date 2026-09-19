@@ -6,35 +6,38 @@ from sqlalchemy import text
 from app.api.drives import router as drives_router
 from app.db.database import AsyncSessionLocal
 
-# from app.services.drive_service import DriveService
+from app.services.drives.configurator import configure_drives
 from app.services.drives.service import DriveService
 
+from app.core.config import settings
 
 drive_service = DriveService()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    drive_service.add_fake_drive(1)
-    drive_service.add_fake_drive(2)
-    drive_service.add_fake_drive(3)
+    if settings.DRIVE_MODE == "real":
+        drive_service.connect()
 
-    print("Fake drives initialized")
+    async with AsyncSessionLocal() as session:
+        await configure_drives(
+            session=session,
+            drive_service=drive_service,
+        )
+
+    if settings.DRIVE_MODE == "fake":
+        print("Fake drives initialized")
+    else:
+        print("RS485 connected")
 
     yield
 
-    print("fake drives stopped")
-    # drive_service.connect()
-    #
-    # drive_service.add_drive(1)
-    #
-    # print("RS485 connected")
-    #
-    # yield
-    #
-    # drive_service.close()
-    #
-    # print("RS485 disconnected")
+    drive_service.close()
+
+    if settings.DRIVE_MODE == "fake":
+        print("Fake drives stopped")
+    else:
+        print("RS485 disconnected")
 
 
 app = FastAPI(title="Washing Machine", version="0.1.0", lifespan=lifespan)
