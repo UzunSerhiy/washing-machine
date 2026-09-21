@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
 
     SERIAL_PORT: str = "/dev/ttyUSB0"
-    BAUDTATE: int = 9600
+    BAUDRATE: int = 9600
 
     DRIVE_MODE: str = "fake"
 

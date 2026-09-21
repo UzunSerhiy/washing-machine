@@ -19,6 +19,8 @@ async def configure_drives(
         drive_service.add_drive(
             drive_id=db_drive.id,
             address=db_drive.address,
+            name=db_drive.name,
             drive_type=db_drive.type,
             position=db_drive.position,
+            enabled=db_drive.is_enabled,
         )

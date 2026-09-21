@@ -11,8 +11,8 @@ class DriveResponse(BaseModel):
     address: int
     type: str
     position: str | None
-    enable: bool
+    enabled: bool
 
-    stutus: int
+    status: int
     frequency_hz: float
     fault: int
