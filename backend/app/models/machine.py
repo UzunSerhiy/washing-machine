@@ -15,3 +15,6 @@ class Machine(Base):
         back_populates="machine",
         cascade="all, delete-orphan",
     )
+    modes: Mapped[list["MachineMode"]] = relationship(
+        back_populates="machine", cascade="all, delete-orphan"
+    )

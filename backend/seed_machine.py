@@ -5,10 +5,12 @@ from sqlalchemy import select
 from app.db.database import AsyncSessionLocal
 from app.models.drive import Drive
 from app.models.machine import Machine
+from app.models.machine_mode import MachineMode
 
 
 async def seed():
     async with AsyncSessionLocal() as session:
+        # Machine
         result = await session.execute(
             select(Machine).where(Machine.name == "Washing Machine")
         )
@@ -22,9 +24,9 @@ async def seed():
             )
 
             session.add(machine)
-
             await session.flush()
 
+        # Drives
         drives = [
             {
                 "name": "Brush Left",
@@ -45,6 +47,7 @@ async def seed():
                 "position": None,
             },
         ]
+
         for drive_data in drives:
             result = await session.execute(
                 select(Drive).where(
@@ -67,9 +70,54 @@ async def seed():
                     )
                 )
 
-            await session.commit()
+        # Machine modes
+        modes = [
+            {
+                "name": "Намотка",
+                "code": "WINDING",
+                "description": "Наматывание материала",
+            },
+            {
+                "name": "Мойка",
+                "code": "WASHING",
+                "description": "Основной режим мойки",
+            },
+            {
+                "name": "Сушка",
+                "code": "DRYING",
+                "description": "Режим сушки материала",
+            },
+            {
+                "name": "Размотка",
+                "code": "UNWINDING",
+                "description": "Разматывание материала",
+            },
+        ]
 
-            print("Machine configurator created")
+        for mode_data in modes:
+            result = await session.execute(
+                select(MachineMode).where(
+                    MachineMode.machine_id == machine.id,
+                    MachineMode.code == mode_data["code"],
+                )
+            )
+
+            mode = result.scalar_one_or_none()
+
+            if mode is None:
+                session.add(
+                    MachineMode(
+                        machine_id=machine.id,
+                        name=mode_data["name"],
+                        code=mode_data["code"],
+                        description=mode_data["description"],
+                        is_enabled=True,
+                    )
+                )
+
+        await session.commit()
+
+        print("Machine configurator created")
 
 
 if __name__ == "__main__":
