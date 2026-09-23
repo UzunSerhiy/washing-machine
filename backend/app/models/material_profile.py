@@ -1,7 +1,12 @@
+from typing import TYPE_CHECKING
 from sqlalchemy import ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+from app.models.winding_calibration import WindingCalibration
+
+if TYPE_CHECKING:
+    from app.models.winding_parameters import WindingParameters
 
 
 class MaterialProfile(Base):
@@ -20,3 +25,11 @@ class MaterialProfile(Base):
     is_enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
 
     machine: Mapped["Machine"] = relationship(back_populates="material_profiles")
+
+    winding_parameters: Mapped["WindingParameters | None"] = relationship(
+        back_populates="material_profile", cascade="all, delete-orphan", uselist=False
+    )
+
+    winding_calibrations: Mapped[list["WindingCalibration"]] = relationship(
+        back_populates="material_profile", cascade="all, delete-orphan"
+    )
