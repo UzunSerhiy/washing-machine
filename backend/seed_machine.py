@@ -31,7 +31,7 @@ async def seed():
         drives = [
             {
                 "name": "Brush Left",
-                "address": 1,
+                "address": 3,
                 "type": "BRUSH",
                 "position": "LEFT",
             },
@@ -43,7 +43,7 @@ async def seed():
             },
             {
                 "name": "Roller",
-                "address": 3,
+                "address": 1,
                 "type": "ROLLER",
                 "position": None,
             },

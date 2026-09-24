@@ -3,6 +3,7 @@ from app.services.modbus.client import ModbusClient
 
 
 class GainDrive(BaseDrive):
+    MAX_FREQUENCY_HZ = 50.0
     REG_FREQUENCY_SET = 0x1000
     REG_FREQUENCY_OUTPUT = 0x1001
     REG_COMMAND = 0x2000
@@ -26,7 +27,7 @@ class GainDrive(BaseDrive):
         self.device_id = device_id
 
     def set_frequency(self, frequency_hz: float) -> None:
-        value = int(frequency_hz * 100)
+        value = int(frequency_hz * 200)
 
         if not 0 <= value <= 65535:
             raise ValueError("Invalid frequency")
@@ -50,6 +51,13 @@ class GainDrive(BaseDrive):
             address=self.REG_STATUS,
             device_id=self.device_id,
         )
+
+    def get_set_frequency(self) -> float:
+        value = self.client.read_register(
+            address=self.REG_FREQUENCY_SET, device_id=self.device_id
+        )
+
+        return value / 10000 * self.MAX_FREQUENCY_HZ
 
     def get_fault(self) -> int:
         return self.client.read_register(

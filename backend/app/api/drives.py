@@ -93,6 +93,28 @@ async def get_drive_frequency(drive_id: int):
         ) from exc
 
 
+@router.get("/{drive_id}/set-frequency")
+async def get_drive_set_frequency(drive_id: int):
+    service = get_drive_service()
+
+    try:
+        drive = service.get_drive(drive_id)
+        frequency = drive.get_set_frequency()
+
+        return {
+            "drive_id": drive_id,
+            "frequency_hz": frequency,
+        }
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        ) from exc
+
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @router.get("/{drive_id}/fault")
 async def get_drive_fault(drive_id: int):
     service = get_drive_service()
