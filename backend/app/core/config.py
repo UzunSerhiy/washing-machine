@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     SERIAL_PORT: str = "/dev/ttyUSB0"
     BAUDRATE: int = 9600
 
-    DRIVE_MODE: str = "real"
+    DRIVE_MODE: str = "fake"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
