@@ -41,9 +41,9 @@ def test_set_belt_safe():
 def test_calibration_is_complete():
     calibration = WashingCalibration()
 
-    calibration.set_material_reaches_brushes(10.0)
-    calibration.set_material_end(20.0)
-    calibration.set_belt_safe(25.0)
+    calibration.set_material_reaches_brushes(70.0)
+    calibration.set_material_end(40.0)
+    calibration.set_belt_safe(15.0)
 
     assert calibration.is_complete() is True
 
@@ -51,9 +51,9 @@ def test_calibration_is_complete():
 def test_validate_complete_calibration():
     calibration = WashingCalibration()
 
-    calibration.set_material_reaches_brushes(10.0)
-    calibration.set_material_end(20.0)
-    calibration.set_belt_safe(25.0)
+    calibration.set_material_reaches_brushes(70.0)
+    calibration.set_material_end(40.0)
+    calibration.set_belt_safe(15.0)
 
     calibration.validate()
 
@@ -100,13 +100,13 @@ def test_validate_requires_belt_safe():
 def test_points_must_be_in_order():
     calibration = WashingCalibration()
 
-    calibration.set_material_reaches_brushes(20.0)
-    calibration.set_material_end(10.0)
-    calibration.set_belt_safe(30.0)
+    calibration.set_material_reaches_brushes(40.0)
+    calibration.set_material_end(70.0)
+    calibration.set_belt_safe(15.0)
 
     with pytest.raises(
         ValueError,
-        match="Washing calibration points must be in order",
+        match="Washing calibration points must be in reverse order",
     ):
         calibration.validate()
 
@@ -114,13 +114,13 @@ def test_points_must_be_in_order():
 def test_equal_points_are_invalid():
     calibration = WashingCalibration()
 
-    calibration.set_material_reaches_brushes(10.0)
-    calibration.set_material_end(10.0)
-    calibration.set_belt_safe(20.0)
+    calibration.set_material_reaches_brushes(40.0)
+    calibration.set_material_end(40.0)
+    calibration.set_belt_safe(15.0)
 
     with pytest.raises(
         ValueError,
-        match="Washing calibration points must be in order",
+        match="Washing calibration points must be in reverse order",
     ):
         calibration.validate()
 
@@ -140,16 +140,16 @@ def test_wahing_calibration_accepts_washing_points():
 
     calibration.set_point(
         CalibrationPoint.WASHING_MATERIAL_REACHES_BRUSHES,
-        10.0,
+        70.0,
     )
 
-    calibration.set_point(CalibrationPoint.WASHING_MATERIAL_END, 20.0)
+    calibration.set_point(CalibrationPoint.WASHING_MATERIAL_END, 40.0)
 
-    calibration.set_point(CalibrationPoint.WASHING_BELT_SAFE, 30.0)
+    calibration.set_point(CalibrationPoint.WASHING_BELT_SAFE, 15.0)
 
-    assert calibration.material_reaches_brushes_turns == 10.0
-    assert calibration.material_end_turns == 20.0
-    assert calibration.belt_safe_turns == 30.0
+    assert calibration.material_reaches_brushes_turns == 70.0
+    assert calibration.material_end_turns == 40.0
+    assert calibration.belt_safe_turns == 15.0
 
 
 def test_washing_calibration_rejects_winding_point():
@@ -169,12 +169,12 @@ def test_washing_calibration_uses_provided_store():
     store = CalibrationPointStore()
     calibration = WashingCalibration(store)
 
-    calibration.set_material_reaches_brushes(10.0)
-    calibration.set_material_end(20.0)
-    calibration.set_belt_safe(30.0)
+    calibration.set_material_reaches_brushes(70.0)
+    calibration.set_material_end(40.0)
+    calibration.set_belt_safe(15.0)
 
-    assert store.get(CalibrationPoint.WASHING_MATERIAL_REACHES_BRUSHES) == 10.0
+    assert store.get(CalibrationPoint.WASHING_MATERIAL_REACHES_BRUSHES) == 70.0
 
-    assert store.get(CalibrationPoint.WASHING_MATERIAL_END) == 20.0
+    assert store.get(CalibrationPoint.WASHING_MATERIAL_END) == 40.0
 
-    assert store.get(CalibrationPoint.WASHING_BELT_SAFE) == 30.0
+    assert store.get(CalibrationPoint.WASHING_BELT_SAFE) == 15.0

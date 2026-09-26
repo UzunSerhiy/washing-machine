@@ -63,10 +63,10 @@ class WashingCalibration:
 
         if not (
             self._material_reaches_brushes_turns
-            < self._material_end_turns
-            < self._belt_safe_turns
+            > self._material_end_turns
+            > self._belt_safe_turns
         ):
-            raise ValueError("Washing calibration points must be in order")
+            raise ValueError("Washing calibration points must be in reverse order")
 
     def set_point(
         self,
