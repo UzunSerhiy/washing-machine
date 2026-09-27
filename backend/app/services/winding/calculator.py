@@ -143,6 +143,22 @@ class WindingCalculator:
             )
         ) / (2 * self.material_thickness_m)
 
+    def set_turns(self, turns: float) -> float:
+        """
+        Устанавливает текущее количество оборотов материала.
+
+        Используется контроллером, когда абсолютная позиция
+        ролика уже известна из калибровки
+        """
+
+        if turns < 0:
+            raise ValueError("Turns cannot be negative")
+
+        self.wound_turns = turns
+        self.wound_length_m = self.length_for_turns(turns)
+
+        return self.wound_turns
+
     def add_turns(self, turns: float) -> float:
         """
         Добавляет физические обороты ролика.

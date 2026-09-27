@@ -22,8 +22,6 @@ class WindingCalibration(Base):
 
     name: Mapped[str] = mapped_column(String(100), nullable=False)
 
-    belt_end_turns: Mapped[float | None] = mapped_column(Float, nullable=True)
-
     material_end_turns: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

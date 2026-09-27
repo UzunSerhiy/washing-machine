@@ -230,3 +230,15 @@ def test_negative_length_conversion_is_rejected():
 
     with pytest.raises(ValueError):
         calculator.turns_for_length(-1)
+
+
+def test_set_turns_updates_winding_state():
+    calculator = WindingCalculator(
+        core_diameter_mm=100.0,
+        material_thickness_mm=1.0,
+    )
+
+    calculator.set_turns(20.0)
+
+    assert calculator.wound_turns == 20.0
+    assert calculator.wound_length_m == calculator.length_for_turns(20.0)

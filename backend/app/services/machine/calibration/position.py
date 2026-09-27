@@ -13,6 +13,12 @@ class RollerPositionTracker:
     def position_turns(self) -> float:
         return self._position_turns
 
+    def set_position(self, position_turns: float) -> None:
+        if position_turns < 0:
+            raise ValueError("Position cannot be negative")
+
+        self._position_turns = position_turns
+
     def move_forward(self, revolutions: float) -> None:
         self._validate_revolutions(revolutions)
         self._position_turns += revolutions

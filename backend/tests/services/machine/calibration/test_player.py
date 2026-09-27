@@ -264,9 +264,9 @@ def test_save_current_position_as_calibration_point(player):
     player.start_jog_forward(5.0)
     player.update(10.0)
 
-    player.save_point(CalibrationPoint.WINDING_BELT_START)
+    player.save_point(CalibrationPoint.MATERIAL_START)
 
-    assert store.get(CalibrationPoint.WINDING_BELT_START) == player.position_turns
+    assert store.get(CalibrationPoint.MATERIAL_START) == player.position_turns
 
 
 def test_save_point_does_not_change_player_position(player):
@@ -279,7 +279,7 @@ def test_save_point_does_not_change_player_position(player):
 
     position_before = player.position_turns
 
-    player.save_point(CalibrationPoint.WINDING_BELT_START)
+    player.save_point(CalibrationPoint.MATERIAL_START)
 
     assert player.position_turns == position_before
 
