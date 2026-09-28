@@ -1,7 +1,11 @@
+from typing import TYPE_CHECKING
 from sqlalchemy import ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.mode_speed_settings import ModeSpeedSettings
 
 
 class MachineMode(Base):
@@ -20,3 +24,9 @@ class MachineMode(Base):
     is_enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
 
     machine: Mapped["Machine"] = relationship(back_populates="modes")
+
+    speed_settings: Mapped["ModeSpeedSettings | None"] = relationship(
+        back_populates="machine_mode",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )

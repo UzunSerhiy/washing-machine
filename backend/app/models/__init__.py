@@ -5,6 +5,7 @@ from app.models.machine_mode import MachineMode
 from app.models.material_profile import MaterialProfile
 from app.models.winding_parameters import WindingParameters
 from app.models.winding_calibration import WindingCalibration
+from app.models.mode_speed_settings import ModeSpeedSettings
 
 __all__ = [
     "Base",
@@ -14,4 +15,5 @@ __all__ = [
     "MaterialProfile",
     "WindingParameters",
     "WindingCalibration",
+    "ModeSpeedSettings",
 ]

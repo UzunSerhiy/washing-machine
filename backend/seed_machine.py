@@ -116,6 +116,30 @@ async def seed():
                     )
                 )
 
+        # Mode speed settings
+        mode_speed_settings = {
+            "WINDING": {
+                "belt_speed_percent": 70,
+                "material_speed_percent": 70,
+                "brush_speed_percent": None,
+            },
+            "WASHING": {
+                "belt_speed_percent": 60,
+                "material_speed_percent": 60,
+                "brush_speed_percent": 90,
+            },
+            "DRYING": {
+                "belt_speed_percent": 30,
+                "material_speed_percent": 30,
+                "brush_speed_percent": 30,
+            },
+            "UNWINDING": {
+                "belt_speed_percent": 80,
+                "material_speed_percent": 80,
+                "brush_speed_percent": None,
+            },
+        }
+
         # Material profiles
         material_profiles = [
             {
