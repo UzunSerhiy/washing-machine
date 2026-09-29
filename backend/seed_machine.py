@@ -7,6 +7,7 @@ from app.models.drive import Drive
 from app.models.machine import Machine
 from app.models.machine_mode import MachineMode
 from app.models.material_profile import MaterialProfile
+from app.models.mode_speed_settings import ModeSpeedSettings
 
 
 async def seed():
@@ -139,6 +140,37 @@ async def seed():
                 "brush_speed_percent": None,
             },
         }
+
+        for mode_code, speed_data in mode_speed_settings.items():
+            result = await session.execute(
+                select(MachineMode).where(
+                    MachineMode.machine_id == machine.id,
+                    MachineMode.code == mode_code,
+                )
+            )
+
+            mode = result.scalar_one_or_none()
+
+            if mode is None:
+                raise RuntimeError(f"Machine mode not found: {mode_code}")
+
+            result = await session.execute(
+                select(ModeSpeedSettings).where(
+                    ModeSpeedSettings.machine_mode_id == mode.id,
+                )
+            )
+
+            speed_settings = result.scalar_one_or_none()
+
+            if speed_settings is None:
+                session.add(
+                    ModeSpeedSettings(
+                        machine_mode_id=mode.id,
+                        belt_speed_percent=speed_data["belt_speed_percent"],
+                        material_speed_percent=speed_data["material_speed_percent"],
+                        brush_speed_percent=speed_data["brush_speed_percent"],
+                    )
+                )
 
         # Material profiles
         material_profiles = [
