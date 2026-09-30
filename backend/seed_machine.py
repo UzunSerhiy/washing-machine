@@ -23,8 +23,8 @@ async def seed():
             machine = Machine(
                 name="Washing Machine",
                 description="Industrial washing machine",
+                roller_core_diameter_mm=200.0,
             )
-
             session.add(machine)
             await session.flush()
 

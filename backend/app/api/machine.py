@@ -9,6 +9,7 @@ from app.schemas.machine import MachineDriveResponse, MachineResponse
 from app.services.drives.service import DriveService
 from app.services.machine.service import MachineService
 
+
 router = APIRouter(
     prefix="/api/machine",
     tags=["machine"],
@@ -23,6 +24,9 @@ def get_drive_service() -> DriveService:
 
 def get_machine_service() -> MachineService:
     from app.main import machine_service
+
+    if machine_service is None:
+        raise RuntimeError("Machine service is not initialized")
 
     return machine_service
 
@@ -65,6 +69,7 @@ async def get_machine():
                 fault=drive.get_fault(),
             )
         )
+
     return MachineResponse(
         id=machine.id,
         name=machine.name,
@@ -76,8 +81,9 @@ async def get_machine():
 
 @router.post("/start")
 def start_machine():
-    machine_service = get_machine_service()
-    machine_service.start()
+    service = get_machine_service()
+
+    service.start()
 
     return {
         "status": "started",
@@ -86,9 +92,10 @@ def start_machine():
 
 @router.post("/stop")
 def stop_machine():
-    machine_service = get_machine_service()
-    machine_service.stop()
+    service = get_machine_service()
+
+    service.stop()
 
     return {
-        "status": "stoped",
+        "status": "stopped",
     }

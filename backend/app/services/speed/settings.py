@@ -23,7 +23,7 @@ class RuntimeSpeedSettings:
 
         self.material_speed_percent = speed_percent
 
-    def set_brush_speed(self, speed_percent: float) -> None:
+    def set_brush_speed(self, speed_percent: float | None) -> None:
         if speed_percent is not None:
             self._validate_speed_percent(speed_percent)
         self.brush_speed_percent = speed_percent

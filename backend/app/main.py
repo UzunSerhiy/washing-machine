@@ -9,19 +9,24 @@ from app.db.database import AsyncSessionLocal
 
 from app.services.drives.configurator import configure_drives
 from app.services.drives.service import DriveService
+from app.services.machine.factory import MachineFactory
+from app.services.machine.machine import Machine
 from app.services.machine.service import MachineService
 
 from app.core.config import settings
 
+
 drive_service = DriveService()
 
-machine_service = MachineService(
-    drive_service=drive_service,
-)
+machine: Machine | None = None
+machine_service: MachineService | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global machine
+    global machine_service
+
     if settings.DRIVE_MODE == "real":
         drive_service.connect()
 
@@ -30,6 +35,13 @@ async def lifespan(app: FastAPI):
             session=session,
             drive_service=drive_service,
         )
+
+    created_machine = MachineFactory.create(drive_service)
+
+    machine = created_machine
+    machine_service = MachineService(
+        machine=created_machine,
+    )
 
     if settings.DRIVE_MODE == "fake":
         print("Fake drives initialized")
@@ -46,7 +58,11 @@ async def lifespan(app: FastAPI):
         print("RS485 disconnected")
 
 
-app = FastAPI(title="Washing Machine", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="Washing Machine",
+    version="0.1.0",
+    lifespan=lifespan,
+)
 
 app.include_router(drives_router)
 app.include_router(machine_router)
@@ -61,4 +77,8 @@ async def health():
 async def health_db():
     async with AsyncSessionLocal() as session:
         result = await session.execute(text("SELECT 1"))
-    return {"status": "ok", "database": result.scalar()}
+
+    return {
+        "status": "ok",
+        "database": result.scalar(),
+    }

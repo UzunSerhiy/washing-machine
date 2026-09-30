@@ -1,3 +1,5 @@
+from app.services.speed.context import SpeedContext
+from app.services.speed.values import SpeedValues
 from app.services.winding.calculator import WindingCalculator
 
 
@@ -27,7 +29,33 @@ class SpeedLayer:
 
         return calculator.frequency_hz(speed_percent)
 
+    def calculate(
+        self,
+        context: SpeedContext,
+    ) -> SpeedValues:
+        settings = context.settings
+        winding_calculator = context.winding_calculator
+
+        belt_frequency_hz = self.belt_frequency(settings.belt_speed_percent)
+
+        material_frequency_hz = self.material_frequency(
+            winding_calculator, settings.material_speed_percent
+        )
+
+        if settings.brush_speed_percent is None:
+            brush_frequency_hz = None
+        else:
+            brush_frequency_hz = self.brush_frequency(settings.brush_speed_percent)
+
+        return SpeedValues(
+            belt_frequency_hz=belt_frequency_hz,
+            material_frequency_hz=material_frequency_hz,
+            brush_frequency_hz=brush_frequency_hz,
+        )
+
     @staticmethod
     def _validate_speed_percent(speed_percent: float) -> None:
         if not 0 < speed_percent <= 100:
-            raise ValueError("Speed pecent must be greater than 0 and no more than 100")
+            raise ValueError(
+                "Speed percent must be greater than 0 and no more than 100"
+            )

@@ -1,25 +1,13 @@
-from app.services.drives.service import DriveService
+from app.services.machine.machine import Machine
 
 
 class MachineService:
-    def __init__(self, drive_service: DriveService):
-        self.drive_service = drive_service
+    def __init__(self, machine: Machine):
+        self.machine = machine
 
     def start(self) -> None:
-        """
-        Starts all configured drives in the forward direction.
-        """
-        for drive_id in sorted(self.drive_service.drives):
-            drive = self.drive_service.get_drive(drive_id)
-            drive.run_forward()
+        self.machine.start_brush(10)
+        self.machine.start_roller_forward(10)
 
     def stop(self) -> None:
-        """
-        Stops all configured drives with deceleration.
-        """
-        for drive_id in sorted(
-            self.drive_service.drives,
-            reverse=True,
-        ):
-            drive = self.drive_service.get_drive(drive_id)
-            drive.stop()
+        self.machine.stop_all()

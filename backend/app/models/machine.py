@@ -1,5 +1,5 @@
 from typing import TYPE_CHECKING
-from sqlalchemy import String
+from sqlalchemy import String, Float
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -17,6 +17,11 @@ class Machine(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(String(500))
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    roller_core_diameter_mm: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        default=200.0,
+    )
     drives: Mapped[list["Drive"]] = relationship(
         back_populates="machine",
         cascade="all, delete-orphan",
