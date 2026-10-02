@@ -9,8 +9,11 @@ class MachineOperationState:
     auto_stage: AutoStage | None = None
     material_profile_id: int | None = None
 
-    roller_speed_percent: float = 0.0
-    brush_speed_percent: float = 0.0
+    roller_speed_percent: float | None = None
+    brush_speed_percent: float | None = None
+
+    roller_running: bool = False
+    brush_running: bool = False
 
     running: bool = False
     paused: bool = False

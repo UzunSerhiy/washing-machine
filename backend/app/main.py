@@ -12,6 +12,7 @@ from app.services.drives.service import DriveService
 from app.services.machine.factory import MachineFactory
 from app.services.machine.machine import Machine
 from app.services.machine.service import MachineService
+from app.services.machine.operation_service import MachineOperationService
 
 from app.core.config import settings
 
@@ -20,12 +21,14 @@ drive_service = DriveService()
 
 machine: Machine | None = None
 machine_service: MachineService | None = None
+machine_operation_service: MachineOperationService | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global machine
     global machine_service
+    global machine_operation_service
 
     if settings.DRIVE_MODE == "real":
         drive_service.connect()
@@ -39,7 +42,12 @@ async def lifespan(app: FastAPI):
     created_machine = MachineFactory.create(drive_service)
 
     machine = created_machine
+
     machine_service = MachineService(
+        machine=created_machine,
+    )
+
+    machine_operation_service = MachineOperationService(
         machine=created_machine,
     )
 

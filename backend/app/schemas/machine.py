@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from app.services.machine.operation import AutoStage, OperationMode
 
 
 class MachineDriveResponse(BaseModel):
@@ -20,3 +21,22 @@ class MachineResponse(BaseModel):
     description: str | None
     is_active: bool
     drives: list[MachineDriveResponse]
+
+
+class MachineOperationResponse(BaseModel):
+    mode: OperationMode
+    auto_stage: AutoStage | None
+    material_profile_id: int | None
+
+    roller_speed_percent: float | None
+    brush_speed_percent: float | None
+
+    roller_running: bool
+    brush_running: bool
+
+    running: bool
+    paused: bool
+
+
+class ManualSpeedRequest(BaseModel):
+    speed_percent: float
