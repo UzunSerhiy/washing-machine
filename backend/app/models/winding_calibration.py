@@ -18,13 +18,7 @@ class WindingCalibration(Base):
         ForeignKey("material_profiles.id"), nullable=False
     )
 
-    mode_code: Mapped[str] = mapped_column(String(30), nullable=False)
-
-    name: Mapped[str] = mapped_column(String(100), nullable=False)
-
     material_end_turns: Mapped[float | None] = mapped_column(Float, nullable=True)
-
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     material_profile: Mapped["MaterialProfile"] = relationship(
         back_populates="winding_calibrations"

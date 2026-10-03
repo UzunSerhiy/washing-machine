@@ -10,10 +10,12 @@ from app.schemas.machine import (
     MachineResponse,
     MachineOperationResponse,
     ManualSpeedRequest,
+    MaterialModeRequest,
 )
 from app.services.drives.service import DriveService
 from app.services.machine.service import MachineService
 from app.services.machine.operation_service import MachineOperationService
+from app.models.material_profile import MaterialProfile
 
 router = APIRouter(
     prefix="/api/machine",
@@ -43,6 +45,25 @@ def get_machine_operation_service() -> MachineOperationService:
         raise RuntimeError("Machine operation service is not initialized")
 
     return machine_operation_service
+
+
+async def get_enabled_material_profile(
+    material_profile_id: int,
+) -> MaterialProfile:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(MaterialProfile).where(
+                MaterialProfile.id == material_profile_id,
+                MaterialProfile.is_enabled.is_(True),
+            )
+        )
+
+        profile = result.scalar_one_or_none()
+
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Material profile not found")
+
+    return profile
 
 
 @router.get("", response_model=MachineResponse)
@@ -158,6 +179,45 @@ def stop_machine():
     return {
         "status": "stopped",
     }
+
+
+@router.post(
+    "/mode/manual",
+    response_model=MachineOperationResponse,
+)
+def set_manual_mode():
+    service = get_machine_operation_service()
+
+    service.set_manual_mode()
+
+    return service.state
+
+
+@router.post("/mode/auto", response_model=MachineOperationResponse)
+async def set_auto_mode(request: MaterialModeRequest):
+    await get_enabled_material_profile(request.material_profile_id)
+
+    service = get_machine_operation_service()
+
+    try:
+        service.set_auto_mode(request.material_profile_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return service.state
+
+
+@router.post("/mode/calibration", response_model=MachineOperationResponse)
+async def set_calibration_mode(request: MaterialModeRequest):
+    await get_enabled_material_profile(request.material_profile_id)
+
+    service = get_machine_operation_service()
+    try:
+        service.set_calibration_mode(request.material_profile_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return service.state
 
 
 @router.post(

@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from app.models.drive import Drive
     from app.models.machine_mode import MachineMode
     from app.models.material_profile import MaterialProfile
+    from app.models.machine_calibration import MachineCalibrationSettings
 
 
 class Machine(Base):
@@ -31,4 +32,8 @@ class Machine(Base):
     )
     material_profiles: Mapped[list["MaterialProfile"]] = relationship(
         back_populates="machine", cascade="all, delete-orphan"
+    )
+
+    calibration: Mapped["MachineCalibrationSettings | None"] = relationship(
+        back_populates="machine", cascade="all, delete-orphan", uselist=False
     )

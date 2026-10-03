@@ -40,3 +40,7 @@ class MachineOperationResponse(BaseModel):
 
 class ManualSpeedRequest(BaseModel):
     speed_percent: float
+
+
+class MaterialModeRequest(BaseModel):
+    material_profile_id: int

@@ -30,6 +30,6 @@ class MaterialProfile(Base):
         back_populates="material_profile", cascade="all, delete-orphan", uselist=False
     )
 
-    winding_calibrations: Mapped[list["WindingCalibration"]] = relationship(
-        back_populates="material_profile", cascade="all, delete-orphan"
+    winding_calibrations: Mapped["WindingCalibration | None"] = relationship(
+        back_populates="material_profile", cascade="all, delete-orphan", uselist=False
     )
