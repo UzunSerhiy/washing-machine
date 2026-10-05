@@ -178,13 +178,19 @@ def test_update_moves_position_forward(player):
 
 
 def test_update_moves_position_reverse(player):
+    player.position_tracker.set_position(1.0)
+
     player.start_jog_reverse(5.0)
 
     player.update(10.0)
 
-    expected = -(5.0 * 905 / 50 / 100 * 10 / 60)
+    revolutions = 5.0 * 905 / 50 / 100 * 10 / 60
+    expected = 1.0 - revolutions
 
     assert player.position_turns == pytest.approx(expected)
+    assert player.running is True
+    assert player.direction == "reverse"
+    assert player.frequency_hz == 5.0
 
 
 def test_update_multiple_times(player):
@@ -294,3 +300,32 @@ def test_invalid_frequency(frequency_hz, player):
         match="Frequency must be greater than zero",
     ):
         player.start_jog_forward(frequency_hz)
+
+
+def test_reverse_stops_at_point_zero() -> None:
+    machine = FakeMachine()
+    position_tracker = RollerPositionTracker()
+    rotation_calculator = RollerRotationCalculator(
+        motor_rpm_at_50hz=1000,
+        gear_ratio=100,
+    )
+
+    player = CalibrationPlayer(
+        machine=machine,
+        position_tracker=position_tracker,
+        rotation_calculator=rotation_calculator,
+    )
+
+    position_tracker.set_position(0.1)
+
+    player.start_jog_reverse(50.0)
+
+    machine.calls.clear()
+
+    player.update(2.0)
+
+    assert position_tracker.position_turns == 0.0
+    assert player.running is False
+    assert player.direction is None
+    assert player.frequency_hz is None
+    assert machine.calls == [("stop",)]

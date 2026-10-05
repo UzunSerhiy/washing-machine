@@ -361,3 +361,151 @@ def test_reset_position_syncs_before_setting_point_zero() -> None:
     service.reset_position()
 
     assert session.position_turns == 0.0
+
+
+def test_complete_returns_completed_session() -> None:
+    service, _ = create_service()
+    session = service.start(material_profile_id=1)
+
+    session.position_tracker.set_position(3.0)
+    service.mark(CalibrationPoint.WASHING_STOP)
+
+    session.position_tracker.set_position(10.0)
+    service.mark(CalibrationPoint.MATERIAL_START)
+
+    session.position_tracker.set_position(35.0)
+    service.mark(CalibrationPoint.MATERIAL_END)
+
+    completed = service.complete()
+
+    assert completed is session
+    assert completed.is_complete()
+    assert service.active is False
+
+
+def test_complete_stops_player() -> None:
+    service, machine = create_service()
+    session = service.start(material_profile_id=1)
+
+    session.position_tracker.set_position(3.0)
+    service.mark(CalibrationPoint.WASHING_STOP)
+
+    session.position_tracker.set_position(10.0)
+    service.mark(CalibrationPoint.MATERIAL_START)
+
+    session.position_tracker.set_position(35.0)
+    service.mark(CalibrationPoint.MATERIAL_END)
+
+    service.jog_forward(20.0)
+
+    machine.calls.clear()
+
+    service.complete()
+
+    assert machine.calls == [("stop",)]
+
+
+def test_complete_requires_complete_calibration() -> None:
+    service, machine = create_service()
+    service.start(material_profile_id=1)
+
+    machine.calls.clear()
+
+    with pytest.raises(
+        ValueError,
+        match="Material start point is not calibrated",
+    ):
+        service.complete()
+
+    assert service.active is True
+
+
+def test_complete_requires_active_session() -> None:
+    service, _ = create_service()
+
+    with pytest.raises(
+        RuntimeError,
+        match="Calibration session is not active",
+    ):
+        service.complete()
+
+
+# def test_tick_updates_running_player_position() -> None:
+#     service, _ = create_service()
+#     session = service.start(material_profile_id=1)
+#
+#     service.jog_forward(20.0)
+#
+#     initial_position = session.position_turns
+#
+#     service.clock.advance(1.0)
+#
+#     service.tick()
+#
+#     assert session.position_turns > initial_position
+
+
+# def test_tick_without_active_session_does_nothing() -> None:
+#     service, _ = create_service()
+#
+#     service.tick()
+
+
+def test_tick_clears_update_time_when_player_stops_at_point_zero() -> None:
+    service, _, clock = create_service_with_clock()
+    session = service.start(material_profile_id=1)
+
+    session.position_tracker.set_position(0.01)
+
+    service.jog_reverse(20.0)
+
+    assert service._last_update_time is not None
+
+    clock.advance(1.0)
+    service.tick()
+
+    assert session.position_turns == 0.0
+    assert session.player.running is False
+    assert service._last_update_time is None
+
+
+def test_tick_updates_running_player_position() -> None:
+    service, _, clock = create_service_with_clock()
+    session = service.start(material_profile_id=1)
+
+    service.jog_forward(20.0)
+
+    assert session.position_turns == 0.0
+
+    clock.advance(1.0)
+    service.tick()
+
+    assert session.position_turns > 0.0
+    assert session.player.running is True
+
+
+def test_tick_without_active_session_does_nothing() -> None:
+    service, _, _ = create_service_with_clock()
+
+    service.tick()
+
+    assert service.active is False
+
+
+def test_tick_stops_reverse_at_point_zero() -> None:
+    service, machine, clock = create_service_with_clock()
+    session = service.start(material_profile_id=1)
+
+    session.position_tracker.set_position(0.01)
+
+    service.jog_reverse(20.0)
+
+    machine.calls.clear()
+
+    clock.advance(1.0)
+    service.tick()
+
+    assert session.position_turns == 0.0
+    assert session.player.running is False
+    assert service._last_update_time is None
+    assert machine.calls == [("stop",)]

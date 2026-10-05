@@ -13,6 +13,9 @@ from app.services.machine.factory import MachineFactory
 from app.services.machine.machine import Machine
 from app.services.machine.service import MachineService
 from app.services.machine.operation_service import MachineOperationService
+from app.services.machine.calibration.session_service import CalibrationSessionService
+from app.services.machine.calibration.runtime import CalibrationRuntime
+from app.services.winding.rotation import RollerRotationCalculator
 
 from app.core.config import settings
 
@@ -22,6 +25,8 @@ drive_service = DriveService()
 machine: Machine | None = None
 machine_service: MachineService | None = None
 machine_operation_service: MachineOperationService | None = None
+calibration_session_service: CalibrationSessionService | None = None
+calibration_runtime: CalibrationRuntime | None = None
 
 
 @asynccontextmanager
@@ -29,6 +34,8 @@ async def lifespan(app: FastAPI):
     global machine
     global machine_service
     global machine_operation_service
+    global calibration_session_service
+    global calibration_runtime
 
     if settings.DRIVE_MODE == "real":
         drive_service.connect()
@@ -51,6 +58,21 @@ async def lifespan(app: FastAPI):
         machine=created_machine,
     )
 
+    rotation_calculator = RollerRotationCalculator(
+        motor_rpm_at_50hz=settings.ROLLER_MOTOR_RPM_AT_50HZ,
+        gear_ratio=settings.ROLLER_GEAR_RATIO,
+    )
+
+    calibration_session_service = CalibrationSessionService(
+        machine=created_machine, rotation_calculator=rotation_calculator
+    )
+
+    calibration_runtime = CalibrationRuntime(
+        calibration_service=calibration_session_service, interval_seconds=0.1
+    )
+
+    await calibration_runtime.start()
+
     if settings.DRIVE_MODE == "fake":
         print("Fake drives initialized")
     else:
@@ -64,6 +86,9 @@ async def lifespan(app: FastAPI):
         print("Fake drives stopped")
     else:
         print("RS485 disconnected")
+
+    if calibration_runtime is not None:
+        await calibration_runtime.stop()
 
 
 app = FastAPI(

@@ -10,6 +10,9 @@ class Settings(BaseSettings):
 
     DRIVE_MODE: str = "fake"
 
+    ROLLER_MOTOR_RPM_AT_50HZ: float = 905.0
+    ROLLER_GEAR_RATIO: float = 100.0
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

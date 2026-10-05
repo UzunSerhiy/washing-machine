@@ -98,6 +98,29 @@ class CalibrationSessionService:
         self._last_update_time = None
         self._session = None
 
+    def complete(self) -> CalibrationSession:
+        session = self.get_current()
+
+        self._sync_position()
+
+        session.player.stop()
+        self._last_update_time = None
+
+        session.validate()
+
+        self._session = None
+
+        return session
+
+    def tick(self) -> None:
+        if self._session is None:
+            return
+
+        self._sync_position()
+
+        if not self._session.player.running:
+            self._last_update_time = None
+
     def _sync_position(self) -> None:
         session = self.get_current()
 

@@ -36,12 +36,30 @@ def test_multiple_movements():
     assert tracker.position_turns == 9.0
 
 
-def test_position_can_be_negative():
+def test_position_cannot_be_negative():
     tracker = RollerPositionTracker()
 
     tracker.move_reverse(5.0)
 
-    assert tracker.position_turns == -5.0
+    assert tracker.position_turns == 0.0
+
+
+def test_reverse_position_is_clamped_at_zero():
+    tracker = RollerPositionTracker()
+
+    tracker.set_position(3.0)
+    tracker.move_reverse(5.0)
+
+    assert tracker.position_turns == 0.0
+
+
+def test_move_reverse_decreases_position():
+    tracker = RollerPositionTracker()
+
+    tracker.set_position(10.0)
+    tracker.move_reverse(3.0)
+
+    assert tracker.position_turns == 7.0
 
 
 def test_reset():

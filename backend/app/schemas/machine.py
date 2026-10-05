@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from app.services.machine.operation import AutoStage, OperationMode
+from app.services.machine.calibration.points import CalibrationPoint
 
 
 class MachineDriveResponse(BaseModel):
@@ -44,3 +45,35 @@ class ManualSpeedRequest(BaseModel):
 
 class MaterialModeRequest(BaseModel):
     material_profile_id: int
+
+
+class CalibrationStartRequest(BaseModel):
+    material_profile_id: int
+
+
+class CalibrationSessionResponse(BaseModel):
+    active: bool
+    material_profile_id: int
+    position_turns: float
+    running: bool
+    paused: bool
+    direction: str | None
+    frequency_hz: float | None
+
+
+class CalibrationJogRequest(BaseModel):
+    frequency_hz: float
+
+
+class CalibrationMarkRequest(BaseModel):
+    point: CalibrationPoint
+
+
+class AutoSpeedSettingsResponse(BaseModel):
+    stage: AutoStage
+    speed_percent: float
+    brush_speed_percent: float | None
+
+
+class AutoSpeedRequest(BaseModel):
+    speed_percent: float

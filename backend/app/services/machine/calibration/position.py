@@ -25,7 +25,7 @@ class RollerPositionTracker:
 
     def move_reverse(self, revolutions: float) -> None:
         self._validate_revolutions(revolutions)
-        self._position_turns -= revolutions
+        self._position_turns = max(0.0, self._position_turns - revolutions)
 
     def reset(self) -> None:
         self._position_turns = 0.0

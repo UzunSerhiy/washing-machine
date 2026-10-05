@@ -15,7 +15,9 @@ class WindingCalibration(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
 
     material_profile_id: Mapped[int] = mapped_column(
-        ForeignKey("material_profiles.id"), nullable=False
+        ForeignKey("material_profiles.id"),
+        nullable=False,
+        unique=True,
     )
 
     material_end_turns: Mapped[float | None] = mapped_column(Float, nullable=True)

@@ -101,6 +101,19 @@ class CalibrationPlayer:
         if self._direction == "forward":
             self.position_tracker.move_forward(revolutions)
         elif self._direction == "reverse":
+            current_position = self.position_tracker.position_turns
+
+            if revolutions >= current_position:
+                self.position_tracker.reset()
+                self.machine.stop_roller()
+
+                self._running = False
+                self._paused = False
+                self._direction = None
+                self._frequency_hz = None
+
+                return
+
             self.position_tracker.move_reverse(revolutions)
 
     def save_point(self, point: CalibrationPoint) -> None:
