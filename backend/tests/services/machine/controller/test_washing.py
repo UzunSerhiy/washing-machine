@@ -248,7 +248,7 @@ def test_update_crosses_material_start_and_enters_belts_phase():
 
     controller.position_tracker.move_forward(101.0)
 
-    controller.winding_calculator.set_turns(180.0 - 101.0)
+    controller.winding_calculator.set_turns(101.0 - 100.0)
 
     frequency_hz = controller.winding_calculator.frequency_hz(
         speed_percent=100.0,
@@ -270,11 +270,11 @@ def test_update_crosses_material_start_and_enters_belts_phase():
     assert controller.completed is False
 
 
-def test_apply_material_frequency_depends_on_remaining_material():
+def test_washing_frequency_increases_as_roll_shrinks():
     controller = create_controller()
     machine = controller.machine
 
-    controller.position_tracker.move_forward(120.0)
+    controller.position_tracker.set_position(160.0)
 
     controller.apply(
         material_speed_percent=100.0,
@@ -282,12 +282,12 @@ def test_apply_material_frequency_depends_on_remaining_material():
         brush_frequency_hz=8.0,
     )
 
-    first_frequency = machine.calls[0][1]
+    frequency_at_160 = machine.calls[0][1]
 
     controller.reset()
     machine.calls.clear()
 
-    controller.position_tracker.move_forward(160.0)
+    controller.position_tracker.set_position(120.0)
 
     controller.apply(
         material_speed_percent=100.0,
@@ -295,10 +295,9 @@ def test_apply_material_frequency_depends_on_remaining_material():
         brush_frequency_hz=8.0,
     )
 
-    second_frequency = machine.calls[0][1]
+    frequency_at_120 = machine.calls[0][1]
 
-    assert first_frequency != second_frequency
-    assert second_frequency > first_frequency
+    assert frequency_at_120 > frequency_at_160
 
 
 def test_update_does_not_overshoot_washing_stop():
@@ -323,7 +322,7 @@ def test_update_to_material_start_then_apply_starts_belt_phase():
 
     controller.position_tracker.move_forward(101.0)
 
-    controller.winding_calculator.set_turns(180.0 - 101.0)
+    controller.winding_calculator.set_turns(101.0 - 100.0)
 
     frequency_hz = controller.winding_calculator.frequency_hz(
         speed_percent=100.0,
@@ -410,3 +409,17 @@ def test_completed_washing_requires_stop_then_wait():
     assert machine.calls == [
         ("stop_all",),
     ]
+
+
+def test_washing_material_curve_uses_current_wound_turns():
+    controller = create_controller()
+
+    controller.position_tracker.set_position(160.0)
+
+    controller.apply(
+        material_speed_percent=100.0,
+        belt_frequency_hz=20.0,
+        brush_frequency_hz=8.0,
+    )
+
+    assert controller.winding_calculator.wound_turns == pytest.approx(60.0)
