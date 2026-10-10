@@ -1,10 +1,12 @@
 import asyncio
+import time
+
 from contextlib import suppress
 from typing import Protocol
 
 
 class AutoService(Protocol):
-    def tick(self) -> None: ...
+    def tick(self, elapsed_seconds: float) -> None: ...
 
 
 class AutoRuntime:
@@ -43,7 +45,13 @@ class AutoRuntime:
         self._task = None
 
     async def _run(self) -> None:
+        last_tick = time.monotonic()
+
         while True:
             await asyncio.sleep(self.interval_seconds)
 
-            self.auto_service.tick()
+            now = time.monotonic()
+            elapsed_seconds = now - last_tick
+            last_tick = now
+
+            self.auto_service.tick(elapsed_seconds=elapsed_seconds)
