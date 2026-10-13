@@ -910,3 +910,294 @@ async def test_pause_failure_enters_fault_state():
 
     with pytest.raises(RuntimeError, match="fault"):
         service.start()
+
+
+@pytest.mark.anyio
+async def test_cannot_reset_fault_with_prepared_session():
+    operation_service = FakeOperationService()
+
+    service = AutoSessionService(
+        machine_id=1,
+        operation_service=operation_service,
+        speed_settings_service=FakeSpeedSettingsService(),
+        calibration_repository=FakeCalibrationRepository(),
+        winding_parameters_repository=FakeWindingParametersRepository(),
+        machine_repository=FakeMachineRepository(),
+    )
+
+    await service.prepare(object())
+
+    service._faulted = True
+
+    with pytest.raises(RuntimeError, match="session"):
+        service.reset_fault()
+
+    assert service._faulted is True
+
+
+def test_cannot_reset_fault_while_running():
+    operation_service = FakeOperationService()
+
+    service = AutoSessionService(
+        machine_id=1,
+        operation_service=operation_service,
+        speed_settings_service=FakeSpeedSettingsService(),
+        calibration_repository=FakeCalibrationRepository(),
+        winding_parameters_repository=FakeWindingParametersRepository(),
+        machine_repository=FakeMachineRepository(),
+    )
+
+    service._faulted = True
+    operation_service.state.running = True
+
+    with pytest.raises(RuntimeError, match="running"):
+        service.reset_fault()
+
+    assert service._faulted is True
+
+
+def test_cannot_reset_fault_without_safety_confirmation():
+    operation_service = FakeOperationService()
+
+    service = AutoSessionService(
+        machine_id=1,
+        operation_service=operation_service,
+        speed_settings_service=FakeSpeedSettingsService(),
+        calibration_repository=FakeCalibrationRepository(),
+        winding_parameters_repository=FakeWindingParametersRepository(),
+        machine_repository=FakeMachineRepository(),
+    )
+
+    service._faulted = True
+
+    assert service._prepared is None
+    assert operation_service.state.running is False
+
+    with pytest.raises(RuntimeError, match="safety"):
+        service.reset_fault()
+
+    assert service._faulted is True
+
+
+def test_auto_session_accepts_safety_service():
+    operation_service = FakeOperationService()
+
+    safety_service = object()
+
+    service = AutoSessionService(
+        machine_id=1,
+        operation_service=operation_service,
+        speed_settings_service=FakeSpeedSettingsService(),
+        calibration_repository=FakeCalibrationRepository(),
+        winding_parameters_repository=FakeWindingParametersRepository(),
+        machine_repository=FakeMachineRepository(),
+        safety_service=safety_service,
+    )
+
+    assert service.safety_service is safety_service
+
+
+def test_reset_fault_calls_safety_service():
+    operation_service = FakeOperationService()
+
+    class FakeSafetyService:
+        def __init__(self):
+            self.calls = 0
+
+        def require_safe_state(self):
+            self.calls += 1
+            raise RuntimeError("safety confirmation failed")
+
+    safety_service = FakeSafetyService()
+
+    service = AutoSessionService(
+        machine_id=1,
+        operation_service=operation_service,
+        speed_settings_service=FakeSpeedSettingsService(),
+        calibration_repository=FakeCalibrationRepository(),
+        winding_parameters_repository=FakeWindingParametersRepository(),
+        machine_repository=FakeMachineRepository(),
+        safety_service=safety_service,
+    )
+
+    service._faulted = True
+
+    with pytest.raises(
+        RuntimeError,
+        match="safety confirmation failed",
+    ):
+        service.reset_fault()
+
+    assert safety_service.calls == 1
+    assert service._faulted is True
+
+
+def test_reset_fault_requires_additional_recovery_checks():
+    operation_service = FakeOperationService()
+
+    class FakeSafetyService:
+        def __init__(self):
+            self.calls = 0
+
+        def require_safe_state(self):
+            self.calls += 1
+
+    class FakeDriveDiagnosticsService:
+        def __init__(self):
+            self.calls = 0
+
+        def require_drives_ready(self):
+            self.calls += 1
+
+    safety_service = FakeSafetyService()
+    diagnostics_service = FakeDriveDiagnosticsService()
+
+    service = AutoSessionService(
+        machine_id=1,
+        operation_service=operation_service,
+        speed_settings_service=FakeSpeedSettingsService(),
+        calibration_repository=FakeCalibrationRepository(),
+        winding_parameters_repository=FakeWindingParametersRepository(),
+        machine_repository=FakeMachineRepository(),
+        safety_service=safety_service,
+        drive_diagnostics_service=diagnostics_service,
+    )
+
+    service._faulted = True
+
+    with pytest.raises(
+        RuntimeError,
+        match="recovery checks are incomplete",
+    ):
+        service.reset_fault()
+
+    assert safety_service.calls == 1
+    assert diagnostics_service.calls == 1
+
+    assert service._faulted is True
+    assert operation_service.state.running is False
+
+
+@pytest.mark.parametrize(
+    "diagnostics_error",
+    [
+        None,
+        RuntimeError("roller communication unavailable"),
+        RuntimeError("brushes drive fault detected"),
+        RuntimeError("roller drive is running"),
+    ],
+)
+def test_reset_fault_requires_drive_diagnostics(
+    diagnostics_error,
+):
+    operation_service = FakeOperationService()
+
+    class FakeSafetyService:
+        def require_safe_state(self):
+            pass
+
+    class FakeDriveDiagnosticsService:
+        def __init__(self):
+            self.calls = 0
+
+        def require_drives_ready(self):
+            self.calls += 1
+
+            if diagnostics_error is not None:
+                raise diagnostics_error
+
+    diagnostics_service = FakeDriveDiagnosticsService()
+
+    service = AutoSessionService(
+        machine_id=1,
+        operation_service=operation_service,
+        speed_settings_service=FakeSpeedSettingsService(),
+        calibration_repository=FakeCalibrationRepository(),
+        winding_parameters_repository=FakeWindingParametersRepository(),
+        machine_repository=FakeMachineRepository(),
+        safety_service=FakeSafetyService(),
+        drive_diagnostics_service=diagnostics_service,
+    )
+
+    service._faulted = True
+
+    if diagnostics_error is None:
+        with pytest.raises(
+            RuntimeError,
+            match="recovery checks are incomplete",
+        ):
+            service.reset_fault()
+    else:
+        with pytest.raises(
+            RuntimeError,
+            match=str(diagnostics_error),
+        ):
+            service.reset_fault()
+
+    assert diagnostics_service.calls == 1
+    assert service._faulted is True
+
+
+@pytest.mark.parametrize(
+    "safety_error, diagnostics_error, expected_calls, expected_error",
+    [
+        (
+            RuntimeError("safety check failed"),
+            None,
+            ["safety"],
+            "safety check failed",
+        ),
+        (
+            None,
+            RuntimeError("drive diagnostics failed"),
+            ["safety", "diagnostics"],
+            "drive diagnostics failed",
+        ),
+        (
+            None,
+            None,
+            ["safety", "diagnostics"],
+            "recovery checks are incomplete",
+        ),
+    ],
+)
+def test_reset_fault_validation_order(
+    safety_error,
+    diagnostics_error,
+    expected_calls,
+    expected_error,
+):
+    calls = []
+    operation_service = FakeOperationService()
+
+    class FakeSafetyService:
+        def require_safe_state(self):
+            calls.append("safety")
+            if safety_error is not None:
+                raise safety_error
+
+    class FakeDriveDiagnosticsService:
+        def require_drives_ready(self):
+            calls.append("diagnostics")
+            if diagnostics_error is not None:
+                raise diagnostics_error
+
+    service = AutoSessionService(
+        machine_id=1,
+        operation_service=operation_service,
+        speed_settings_service=FakeSpeedSettingsService(),
+        calibration_repository=FakeCalibrationRepository(),
+        winding_parameters_repository=FakeWindingParametersRepository(),
+        machine_repository=FakeMachineRepository(),
+        safety_service=FakeSafetyService(),
+        drive_diagnostics_service=FakeDriveDiagnosticsService(),
+    )
+
+    service._faulted = True
+
+    with pytest.raises(RuntimeError, match=expected_error):
+        service.reset_fault()
+
+    assert calls == expected_calls
+    assert service._faulted is True
+    assert operation_service.state.running is False

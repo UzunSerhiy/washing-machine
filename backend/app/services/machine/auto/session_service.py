@@ -44,6 +44,8 @@ class AutoSessionService:
         calibration_repository: CalibrationRepository | None = None,
         winding_parameters_repository: WindingParametersRepository | None = None,
         machine_repository: MachineRepository | None = None,
+        safety_service=None,
+        drive_diagnostics_service=None,
     ):
         self.machine_id = machine_id
         self.operation_service = operation_service
@@ -57,6 +59,8 @@ class AutoSessionService:
         self.machine_repository = machine_repository or MachineRepository()
 
         self.speed_layer = SpeedLayer()
+        self.safety_service = safety_service
+        self.drive_diagnostics_service = drive_diagnostics_service
         self._prepared: PreparedAutoStage | None = None
         self._faulted = False
 
@@ -281,3 +285,24 @@ class AutoSessionService:
             state.running = False
             state.paused = False
             self._prepared = None
+
+    def reset_fault(self) -> None:
+        if self._prepared is not None:
+            raise RuntimeError("Cannot reset fault: AUTO session must be stopped")
+
+        if self.operation_service.state.running:
+            raise RuntimeError("Cannot reset fault: machine session is running")
+
+        if self.safety_service is None:
+            raise RuntimeError("Cannot reset fault: safety service is not configured")
+
+        self.safety_service.require_safe_state()
+
+        if self.drive_diagnostics_service is None:
+            raise RuntimeError(
+                "Cannot reset fault: drive diagnostics service is not configured"
+            )
+
+        self.drive_diagnostics_service.require_drives_ready()
+
+        raise RuntimeError("Cannot reset fault: recovery checks are incomplete")
