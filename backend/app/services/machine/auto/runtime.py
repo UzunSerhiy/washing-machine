@@ -1,8 +1,11 @@
 import asyncio
 import time
+import logging
 
 from contextlib import suppress
 from typing import Protocol
+
+logger = logging.getLogger(__name__)
 
 
 class AutoService(Protocol):
@@ -54,4 +57,8 @@ class AutoRuntime:
             elapsed_seconds = now - last_tick
             last_tick = now
 
-            self.auto_service.tick(elapsed_seconds=elapsed_seconds)
+            try:
+                self.auto_service.tick(elapsed_seconds=elapsed_seconds)
+            except Exception:
+                logger.exception("AUTO runtime stopped due to controller error")
+                raise

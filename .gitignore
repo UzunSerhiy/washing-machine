@@ -7,3 +7,16 @@ venv/
 .vscode/
 .next/
 node_modules/
+
+
+# Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.env.local
+frontend/.env*.local
+frontend/*.tsbuildinfo
+
+# Environment
+.env

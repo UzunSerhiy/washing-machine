@@ -6,6 +6,7 @@ from sqlalchemy import text
 
 from app.api.drives import router as drives_router
 from app.api.machine import router as machine_router
+from app.api.material_profiles import router as material_profiles_router
 from app.db.database import AsyncSessionLocal
 
 from app.services.drives.configurator import configure_drives
@@ -17,6 +18,9 @@ from app.services.machine.operation_service import MachineOperationService
 from app.services.machine.calibration.session_service import CalibrationSessionService
 from app.services.machine.calibration.runtime import CalibrationRuntime
 from app.services.winding.rotation import RollerRotationCalculator
+from app.services.machine.auto.session_service import AutoSessionService
+from app.services.machine.auto.runtime import AutoRuntime
+from app.services.speed.auto_settings import AutoSpeedSettingsService
 
 from app.core.config import settings
 
@@ -28,6 +32,8 @@ machine_service: MachineService | None = None
 machine_operation_service: MachineOperationService | None = None
 calibration_session_service: CalibrationSessionService | None = None
 calibration_runtime: CalibrationRuntime | None = None
+auto_session_service: AutoSessionService | None = None
+auto_runtime: AutoRuntime | None = None
 
 
 @asynccontextmanager
@@ -37,6 +43,8 @@ async def lifespan(app: FastAPI):
     global machine_operation_service
     global calibration_session_service
     global calibration_runtime
+    global auto_session_service
+    global auto_runtime
 
     if settings.DRIVE_MODE == "real":
         drive_service.connect()
@@ -58,6 +66,19 @@ async def lifespan(app: FastAPI):
     machine_operation_service = MachineOperationService(
         machine=created_machine,
     )
+
+    auto_session_service = AutoSessionService(
+        machine_id=1,
+        operation_service=machine_operation_service,
+        speed_settings_service=AutoSpeedSettingsService(),
+    )
+
+    auto_runtime = AutoRuntime(
+        auto_service=auto_session_service,
+        interval_seconds=0.1,
+    )
+
+    await auto_runtime.start()
 
     rotation_calculator = RollerRotationCalculator(
         motor_rpm_at_50hz=settings.ROLLER_MOTOR_RPM_AT_50HZ,
@@ -91,6 +112,9 @@ async def lifespan(app: FastAPI):
     if calibration_runtime is not None:
         await calibration_runtime.stop()
 
+    if auto_runtime is not None:
+        await auto_runtime.stop()
+
 
 app = FastAPI(
     title="Washing Machine",
@@ -108,6 +132,7 @@ app.add_middleware(
 
 app.include_router(drives_router)
 app.include_router(machine_router)
+app.include_router(material_profiles_router)
 
 
 @app.get("/api/health")

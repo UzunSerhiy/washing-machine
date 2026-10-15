@@ -68,6 +68,14 @@ class AutoSessionService:
         self,
         session: Any,
     ) -> PreparedAutoStage:
+        if self._faulted:
+            raise RuntimeError("Cannot prepare AUTO: controller is in fault state")
+
+        if self._prepared is not None:
+            raise RuntimeError(
+                "AUTO session already exists; stop it before preparing again"
+            )
+
         state = self.operation_service.state
 
         if state.mode != OperationMode.AUTO:
@@ -153,14 +161,22 @@ class AutoSessionService:
         if self._faulted:
             raise RuntimeError("Cannot start AUTO: controller is in fault state")
 
-        if self._prepared is None:
-            raise RuntimeError("Auto stage is not prepared")
+        self.require_current_mode()
+
+        state = self.operation_service.state
 
         prepared = self._prepared
 
-        belt_frequency_hz = self.speed_layer.belt_frequency(prepared.mode_speed_percent)
+        if state.running:
+            raise RuntimeError("AUTO session is already running")
 
-        state = self.operation_service.state
+        if state.paused:
+            raise RuntimeError("AUTO session is paused; use resume()")
+
+        if prepared.controller.completed:
+            raise RuntimeError("AUTO session is already completed")
+
+        belt_frequency_hz = self.speed_layer.belt_frequency(prepared.mode_speed_percent)
 
         try:
             prepared.controller.apply(
@@ -168,9 +184,7 @@ class AutoSessionService:
                 speed_percent=prepared.mode_speed_percent,
             )
         except Exception:
-            self._faulted = True
-            state.running = False
-            state.paused = False
+            self._handle_controller_fault()
             raise
 
         state.running = True
@@ -182,6 +196,12 @@ class AutoSessionService:
 
         if self._prepared is None:
             return
+
+        try:
+            self.require_current_mode()
+        except Exception:
+            self._handle_controller_fault()
+            raise
 
         state = self.operation_service.state
 
@@ -207,9 +227,7 @@ class AutoSessionService:
             )
 
         except Exception:
-            self._faulted = True
-            state.running = False
-            state.paused = False
+            self._handle_controller_fault()
             raise
 
         if prepared.controller.completed:
@@ -217,8 +235,7 @@ class AutoSessionService:
             state.paused = False
 
     def pause(self) -> None:
-        if self._prepared is None:
-            raise RuntimeError("Auto stage is not prepared")
+        self.require_current_mode()
 
         state = self.operation_service.state
 
@@ -229,9 +246,7 @@ class AutoSessionService:
             self._prepared.controller.machine.stop_roller()
 
         except Exception:
-            self._faulted = True
-            state.running = False
-            state.paused = False
+            self._handle_controller_fault()
             raise
 
         state.running = False
@@ -240,6 +255,8 @@ class AutoSessionService:
     def resume(self) -> None:
         if self._faulted:
             raise RuntimeError("Cannot resume AUTO: controller is in fault state")
+
+        self.require_current_mode()
 
         if self._prepared is None:
             raise RuntimeError("Auto stage is not prepared")
@@ -262,9 +279,7 @@ class AutoSessionService:
                 speed_percent=prepared.mode_speed_percent,
             )
         except Exception:
-            self._faulted = True
-            state.running = False
-            state.paused = False
+            self._handle_controller_fault()
             raise
 
         state.running = True
@@ -276,11 +291,9 @@ class AutoSessionService:
         try:
             if self._prepared is not None:
                 self._prepared.controller.machine.stop_roller()
-
         except Exception:
-            self._faulted = True
+            self._handle_controller_fault()
             raise
-
         finally:
             state.running = False
             state.paused = False
@@ -306,3 +319,83 @@ class AutoSessionService:
         self.drive_diagnostics_service.require_drives_ready()
 
         raise RuntimeError("Cannot reset fault: recovery checks are incomplete")
+
+    def get_status(self) -> dict:
+        state = self.operation_service.state
+        if self._faulted:
+            status = "FAULT"
+        elif self._prepared is None:
+            status = "IDLE"
+        elif state.running:
+            status = "RUNNING"
+        elif state.paused:
+            status = "PAUSED"
+        elif self._prepared.controller.completed:
+            status = "COMPLETED"
+        else:
+            status = "PREPARED"
+
+        return {
+            "status": status,
+            "stage": (
+                self._prepared.stage.value if self._prepared is not None else None
+            ),
+            "material_profile_id": (
+                self._prepared.material_profile_id
+                if self._prepared is not None
+                else None
+            ),
+            "speed_percent": (
+                self._prepared.mode_speed_percent
+                if self._prepared is not None
+                else None
+            ),
+            "running": state.running,
+            "paused": state.paused,
+            "position_turns": (
+                self._prepared.controller.position_turns
+                if self._prepared is not None
+                else None
+            ),
+            "phase": (
+                self._prepared.controller.phase.value
+                if self._prepared is not None
+                else None
+            ),
+            "completed": (
+                self._prepared.controller.completed
+                if self._prepared is not None
+                else False
+            ),
+        }
+
+    def _handle_controller_fault(self) -> None:
+        self._faulted = True
+
+        state = self.operation_service.state
+        state.running = False
+        state.paused = False
+
+        try:
+            self.operation_service.machine.stop_all()
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "Failed to stop machine after AUTO fault"
+            )
+
+    def require_current_mode(self) -> None:
+        if self._prepared is None:
+            raise RuntimeError("AUTO session is not prepared")
+
+        state = self.operation_service.state
+
+        if state.mode != OperationMode.AUTO:
+            raise RuntimeError("Machine is not in AUTO mode")
+
+        if state.auto_stage != self._prepared.stage:
+            raise RuntimeError("AUTO stage has changed")
+
+        if state.material_profile_id != self._prepared.material_profile_id:
+            raise RuntimeError("Material profile has changed")

@@ -27,6 +27,9 @@ from app.services.machine.calibration.repository import CalibrationRepository
 from app.services.speed.auto_settings import AutoSpeedSettingsService
 from app.services.machine.operation import AutoStage
 
+from app.services.machine.auto.session_service import AutoSessionService
+from app.core.config import settings
+
 router = APIRouter(
     prefix="/api/machine",
     tags=["machine"],
@@ -57,6 +60,15 @@ def get_machine_operation_service() -> MachineOperationService:
     return machine_operation_service
 
 
+def get_auto_session_service() -> AutoSessionService:
+    from app.main import auto_session_service
+
+    if auto_session_service is None:
+        raise RuntimeError("AUTO session service is not initialized")
+
+    return auto_session_service
+
+
 def get_calibration_session_service() -> CalibrationSessionService:
     from app.main import calibration_session_service
 
@@ -80,6 +92,22 @@ def build_calibration_session_response(
         direction=session.player.direction,
         frequency_hz=session.player.frequency_hz,
     )
+
+
+def stop_auto_before_mode_change():
+    auto_service = get_auto_session_service()
+
+    if auto_service.get_status()["status"] == "FAULT":
+        raise HTTPException(
+            status_code=409,
+            detail="AUTO controller is in FAULT state",
+        )
+
+    if auto_service.get_status()["status"] != "IDLE":
+        try:
+            auto_service.stop()
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 async def get_enabled_material_profile(
@@ -221,6 +249,7 @@ def stop_machine():
     response_model=MachineOperationResponse,
 )
 def set_manual_mode():
+    stop_auto_before_mode_change()
     service = get_machine_operation_service()
 
     service.set_manual_mode()
@@ -232,6 +261,7 @@ def set_manual_mode():
 async def set_auto_mode(request: MaterialModeRequest):
     await get_enabled_material_profile(request.material_profile_id)
 
+    stop_auto_before_mode_change()
     service = get_machine_operation_service()
 
     try:
@@ -246,6 +276,7 @@ async def set_auto_mode(request: MaterialModeRequest):
 async def set_calibration_mode(request: MaterialModeRequest):
     await get_enabled_material_profile(request.material_profile_id)
 
+    stop_auto_before_mode_change()
     service = get_machine_operation_service()
     try:
         service.set_calibration_mode(request.material_profile_id)
@@ -584,3 +615,88 @@ async def set_auto_brush_speed(
         speed_percent=settings.mode_speed_percent,
         brush_speed_percent=settings.brush_speed_percent,
     )
+
+
+# -------------------------------------------------
+# AUTO SESSION
+# -------------------------------------------------
+
+
+def require_fake_auto():
+    if settings.DRIVE_MODE != "fake":
+        raise HTTPException(
+            status_code=403,
+            detail="AUTO HTTP control is currently enabled only in fake mode",
+        )
+
+
+@router.get("/auto/session")
+def get_auto_session():
+    service = get_auto_session_service()
+    return service.get_status()
+
+
+@router.post("/auto/prepare")
+async def prepare_auto():
+    require_fake_auto()
+    service = get_auto_session_service()
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await service.prepare(session=session)
+    except (ValueError, RuntimeError, NotImplementedError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return service.get_status()
+
+
+@router.post("/auto/start")
+def start_auto():
+    require_fake_auto()
+    service = get_auto_session_service()
+
+    try:
+        service.start()
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return service.get_status()
+
+
+@router.post("/auto/pause")
+def pause_auto():
+    require_fake_auto()
+    service = get_auto_session_service()
+
+    try:
+        service.pause()
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return service.get_status()
+
+
+@router.post("/auto/resume")
+def resume_auto():
+    require_fake_auto()
+    service = get_auto_session_service()
+
+    try:
+        service.resume()
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return service.get_status()
+
+
+@router.post("/auto/stop")
+def stop_auto():
+    require_fake_auto()
+    service = get_auto_session_service()
+
+    try:
+        service.stop()
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return service.get_status()
