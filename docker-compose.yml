@@ -19,10 +19,15 @@ services:
       - postgres
     environment:
       DATABASE_URL: ${DATABASE_URL}
+      ESP32_SERIAL_PORT: /dev/ttyACM0
+      ESP32_SERIAL_BAUDRATE: "115200"
     ports:
       - '8001:8000'
-    # devices:
+    devices:
+      - /dev/ttyACM0:/dev/ttyACM0
     # - "/dev/ttyUSB0:/dev/ttyUSB0"
+    group_add:
+      - "984"
     volumes:
       - ./backend:/app
 

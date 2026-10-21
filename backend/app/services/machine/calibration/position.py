@@ -23,9 +23,19 @@ class RollerPositionTracker:
         self._validate_revolutions(revolutions)
         self._position_turns += revolutions
 
-    def move_reverse(self, revolutions: float) -> None:
+    def move_reverse(
+        self,
+        revolutions: float,
+        allow_negative: bool = False,
+    ) -> None:
         self._validate_revolutions(revolutions)
-        self._position_turns = max(0.0, self._position_turns - revolutions)
+
+        new_position = self._position_turns - revolutions
+
+        if allow_negative:
+            self._position_turns = new_position
+        else:
+            self._position_turns = max(0.0, new_position)
 
     def reset(self) -> None:
         self._position_turns = 0.0

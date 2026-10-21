@@ -3,6 +3,8 @@ from app.services.machine.calibration.position import RollerPositionTracker
 from app.services.winding.rotation import RollerRotationCalculator
 from app.services.machine.calibration.points import CalibrationPoint
 from app.services.machine.calibration.store import CalibrationPointStore
+from app.services.machine.calibration.stage import CalibrationStage
+from collections.abc import Callable
 
 
 class CalibrationPlayer:
@@ -12,6 +14,7 @@ class CalibrationPlayer:
         position_tracker: RollerPositionTracker,
         rotation_calculator: RollerRotationCalculator,
         calibration_store: CalibrationPointStore | None = None,
+        stage_getter: Callable[[], CalibrationStage] | None = None,
     ):
         self.machine = machine
         self.position_tracker = position_tracker
@@ -22,6 +25,9 @@ class CalibrationPlayer:
         self._paused = False
         self._direction: str | None = None
         self._frequency_hz: float | None = None
+        self._brush_running = False
+        self._brush_frequency_hz: float | None = None
+        self._stage_getter = stage_getter
 
     @property
     def running(self) -> bool:
@@ -42,6 +48,28 @@ class CalibrationPlayer:
     @property
     def position_turns(self) -> float:
         return self.position_tracker.position_turns
+
+    @property
+    def brush_running(self) -> bool:
+        return self._brush_running
+
+    @property
+    def brush_frequency_hz(self) -> float | None:
+        return self._brush_frequency_hz
+
+    def start_brush(self, frequency_hz: float) -> None:
+        self._validate_frequency(frequency_hz)
+
+        self.machine.start_brush(frequency_hz)
+
+        self._brush_running = True
+        self._brush_frequency_hz = frequency_hz
+
+    def stop_brush(self) -> None:
+        self.machine.stop_brush()
+
+        self._brush_running = False
+        self._brush_frequency_hz = None
 
     def start_jog_forward(self, frequency_hz: float) -> None:
         self._validate_frequency(frequency_hz)
@@ -64,12 +92,15 @@ class CalibrationPlayer:
         self._frequency_hz = frequency_hz
 
     def stop(self) -> None:
-        self.machine.stop_roller()
+        self.machine.stop_all()
 
         self._running = False
         self._paused = False
         self._direction = None
         self._frequency_hz = None
+
+        self._brush_running = False
+        self._brush_frequency_hz = None
 
     def pause(self) -> None:
         if not self._running:
@@ -101,6 +132,18 @@ class CalibrationPlayer:
         if self._direction == "forward":
             self.position_tracker.move_forward(revolutions)
         elif self._direction == "reverse":
+            allow_negative = (
+                self._stage_getter is not None
+                and self._stage_getter() == CalibrationStage.SET_ZERO
+            )
+
+            if allow_negative:
+                self.position_tracker.move_reverse(
+                    revolutions,
+                    allow_negative=True,
+                )
+                return
+
             current_position = self.position_tracker.position_turns
 
             if revolutions >= current_position:
@@ -111,7 +154,6 @@ class CalibrationPlayer:
                 self._paused = False
                 self._direction = None
                 self._frequency_hz = None
-
                 return
 
             self.position_tracker.move_reverse(revolutions)

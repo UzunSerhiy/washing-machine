@@ -3,6 +3,8 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from pydantic import BaseModel
+
 from app.db.database import AsyncSessionLocal
 from app.models.machine import Machine
 from app.schemas.machine import (
@@ -26,6 +28,7 @@ from app.models.material_profile import MaterialProfile
 from app.services.machine.calibration.repository import CalibrationRepository
 from app.services.speed.auto_settings import AutoSpeedSettingsService
 from app.services.machine.operation import AutoStage
+from app.services.machine.calibration.homing import HomingState
 
 from app.services.machine.auto.session_service import AutoSessionService
 from app.core.config import settings
@@ -34,6 +37,19 @@ router = APIRouter(
     prefix="/api/machine",
     tags=["machine"],
 )
+
+
+class FakeReferenceRequest(BaseModel):
+    triggered: bool
+
+
+class FakeReferenceConnectionRequest(BaseModel):
+    connected: bool
+
+
+class CalibrationHomeRequest(BaseModel):
+    frequency_hz: float
+    position_confirmed: bool
 
 
 def get_drive_service() -> DriveService:
@@ -91,6 +107,12 @@ def build_calibration_session_response(
         paused=session.player.paused,
         direction=session.player.direction,
         frequency_hz=session.player.frequency_hz,
+        washing_stop_turns=session.machine_calibration.washing_stop_turns,
+        material_start_turns=session.machine_calibration.material_start_turns,
+        material_end_turns=session.winding_calibration.material_end_turns,
+        brush_running=session.player.brush_running,
+        brush_frequency_hz=session.player.brush_frequency_hz,
+        stage=session.stage,
     )
 
 
@@ -355,14 +377,17 @@ def stop_manual_brush():
     return service.state
 
 
-@router.get("/calibration", response_model=CalibrationSessionResponse)
+@router.get(
+    "/calibration",
+    response_model=CalibrationSessionResponse,
+)
 def get_calibration():
     service = get_calibration_session_service()
 
-    try:
-        return build_calibration_session_response(service)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not service.active:
+        return CalibrationSessionResponse(active=False)
+
+    return build_calibration_session_response(service)
 
 
 @router.post("/calibration/start", response_model=CalibrationSessionResponse)
@@ -510,6 +535,7 @@ async def complete_calibration():
             )
 
             await db.commit()
+            service.finish()
 
         except (ValueError, RuntimeError) as exc:
             await db.rollback()
@@ -525,6 +551,99 @@ async def complete_calibration():
         "status": "completed",
         "machine_id": machine.id,
         "material_profile_id": calibration_session.material_profile_id,
+    }
+
+
+@router.post(
+    "/calibration/brush/start",
+    response_model=CalibrationSessionResponse,
+)
+def calibration_brush_start(request: CalibrationJogRequest):
+    service = get_calibration_session_service()
+
+    try:
+        service.start_brush(request.frequency_hz)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    return build_calibration_session_response(service)
+
+
+@router.post(
+    "/calibration/brush/stop",
+    response_model=CalibrationSessionResponse,
+)
+def calibration_brush_stop():
+    service = get_calibration_session_service()
+
+    try:
+        service.stop_brush()
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    return build_calibration_session_response(service)
+
+
+@router.get("/calibration/home")
+def get_calibration_home():
+    service = get_calibration_session_service()
+
+    if service.homing is None:
+        return {"available": False, "state": None, "error": None}
+
+    return {
+        "available": True,
+        "state": service.homing.state,
+        "error": service.homing.error,
+    }
+
+
+@router.post("/calibration/home")
+def start_calibration_home(request: CalibrationHomeRequest):
+    if settings.DRIVE_MODE != "fake":
+        raise HTTPException(
+            status_code=403,
+            detail="Homing is currently available only in fake mode",
+        )
+
+    service = get_calibration_session_service()
+
+    if not request.position_confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail="Operator must confirm roller position within 0..1 revolution",
+        )
+
+    try:
+        service.start_homing(request.frequency_hz)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "state": service.homing.state,
+        "error": service.homing.error,
+    }
+
+
+@router.post("/calibration/home/cancel")
+def cancel_calibration_home():
+    service = get_calibration_session_service()
+
+    if service.homing is None:
+        raise HTTPException(status_code=400, detail="Homing is not configured")
+
+    if service.homing.state == HomingState.SEARCHING:
+        service.stop()
+
+    return {
+        "state": service.homing.state,
+        "error": service.homing.error,
     }
 
 
@@ -700,3 +819,58 @@ def stop_auto():
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return service.get_status()
+
+
+# -------------------------------------------------
+# emulatod microbutton start0point
+# -------------------------------------------------
+
+
+@router.get("/sensors/roller-reference")
+def get_roller_reference():
+    from app.main import roller_reference_sensor
+
+    if roller_reference_sensor is None:
+        raise HTTPException(status_code=503, detail="Sensor is not initialized")
+
+    return roller_reference_sensor.read()
+
+
+@router.post("/sensors/roller-reference/fake")
+def set_fake_roller_reference(request: FakeReferenceRequest):
+    if settings.DRIVE_MODE != "fake":
+        raise HTTPException(
+            status_code=403,
+            detail="Fake sensor control is disabled in real mode",
+        )
+
+    from app.main import roller_reference_sensor
+
+    if roller_reference_sensor is None:
+        raise HTTPException(status_code=503, detail="Sensor is not initialized")
+
+    roller_reference_sensor.set_triggered(request.triggered)
+
+    return roller_reference_sensor.read()
+
+
+@router.post("/sensors/roller-reference/fake/connection")
+def set_fake_roller_reference_connection(
+    request: FakeReferenceConnectionRequest,
+):
+    if settings.DRIVE_MODE != "fake":
+        raise HTTPException(
+            status_code=403,
+            detail="Fake sensor control is disabled in real mode",
+        )
+
+    from app.main import roller_reference_sensor
+
+    if roller_reference_sensor is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Sensor is not initialized",
+        )
+
+    roller_reference_sensor.set_connected(request.connected)
+    return roller_reference_sensor.read()

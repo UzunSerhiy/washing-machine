@@ -21,6 +21,8 @@ from app.services.winding.rotation import RollerRotationCalculator
 from app.services.machine.auto.session_service import AutoSessionService
 from app.services.machine.auto.runtime import AutoRuntime
 from app.services.speed.auto_settings import AutoSpeedSettingsService
+from app.services.machine.sensors.fake_reference import FakeRollerReferenceSensor
+from app.services.machine.sensors.service import RollerSensorService
 
 from app.core.config import settings
 
@@ -34,6 +36,7 @@ calibration_session_service: CalibrationSessionService | None = None
 calibration_runtime: CalibrationRuntime | None = None
 auto_session_service: AutoSessionService | None = None
 auto_runtime: AutoRuntime | None = None
+roller_reference_sensor: FakeRollerReferenceSensor | None = None
 
 
 @asynccontextmanager
@@ -45,6 +48,7 @@ async def lifespan(app: FastAPI):
     global calibration_runtime
     global auto_session_service
     global auto_runtime
+    global roller_reference_sensor
 
     if settings.DRIVE_MODE == "real":
         drive_service.connect()
@@ -85,8 +89,13 @@ async def lifespan(app: FastAPI):
         gear_ratio=settings.ROLLER_GEAR_RATIO,
     )
 
+    roller_reference_sensor = FakeRollerReferenceSensor()
+    roller_sensor_service = RollerSensorService(roller_reference_sensor)
+
     calibration_session_service = CalibrationSessionService(
-        machine=created_machine, rotation_calculator=rotation_calculator
+        machine=created_machine,
+        rotation_calculator=rotation_calculator,
+        sensor_service=roller_sensor_service,
     )
 
     calibration_runtime = CalibrationRuntime(
