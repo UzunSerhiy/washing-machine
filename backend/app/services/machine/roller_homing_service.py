@@ -1,5 +1,7 @@
 import logging
 import math
+from functools import wraps
+from threading import RLock
 
 from app.services.machine.calibration.clock import MonotonicClock
 from app.services.machine.calibration.homing import (
@@ -14,6 +16,14 @@ from app.services.winding.rotation import RollerRotationCalculator
 logger = logging.getLogger(__name__)
 
 
+def _synchronized(method):
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._state_lock:
+            return method(self, *args, **kwargs)
+    return wrapper
+
+
 class RollerHomingService:
     OWNER = "homing"
     DEFAULT_FREQUENCY_HZ = 10.0
@@ -24,6 +34,7 @@ class RollerHomingService:
         sensor_service: RollerSensorService,
         rotation_calculator: RollerRotationCalculator,
     ) -> None:
+        self._state_lock = RLock()
         self.machine = machine
         self.rotation_calculator = rotation_calculator
         self.clock = MonotonicClock()
@@ -42,21 +53,26 @@ class RollerHomingService:
         self._error: str | None = None
 
     @property
+    @_synchronized
     def searching(self) -> bool:
         return self.homing.state == HomingState.SEARCHING
 
     @property
+    @_synchronized
     def homed(self) -> bool:
         return self._homed and not self._faulted
 
     @property
+    @_synchronized
     def faulted(self) -> bool:
         return self._faulted
 
+    @_synchronized
     def require_zero(self) -> None:
         if not self.homed:
             raise RuntimeError("Point 0 is not confirmed. Perform homing first.")
 
+    @_synchronized
     def start(
         self,
         *,
@@ -111,6 +127,7 @@ class RollerHomingService:
             self._fail_and_stop(f"Failed to start homing: {exc}")
             raise
 
+    @_synchronized
     def tick(self) -> None:
         if not self.searching:
             return
@@ -170,6 +187,7 @@ class RollerHomingService:
 
         self.machine.release_roller(self.OWNER)
 
+    @_synchronized
     def cancel(self) -> None:
         if not self.searching:
             return
@@ -189,6 +207,7 @@ class RollerHomingService:
             self._frequency_hz = None
             self.machine.release_roller(self.OWNER)
 
+    @_synchronized
     def invalidate(self) -> None:
         self._homed = False
 
@@ -211,6 +230,7 @@ class RollerHomingService:
         # В faulted владение НЕ освобождаем.
         # Требуется отдельная процедура восстановления.
 
+    @_synchronized
     def get_status(self) -> dict:
         return {
             "state": self.homing.state.value,
@@ -222,6 +242,7 @@ class RollerHomingService:
             "roller_owner": self.machine.roller_owner,
         }
 
+    @_synchronized
     def external_stop(self) -> None:
         """
         Вал остановлен командой другого сервиса.

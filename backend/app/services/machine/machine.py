@@ -93,13 +93,15 @@ class Machine:
                 # Владение валом не освобождаем.
                 raise
 
-            if owner != self._roller_owner:
-                self._notify_external_roller_stop()
+            notify_external = owner != self._roller_owner
+
+        if notify_external:
+            self._notify_external_roller_stop()
 
     def stop_roller_coast(self) -> None:
         with self._roller_lock:
             self.roller.stop_coast()
-            self._notify_external_roller_stop()
+        self._notify_external_roller_stop()
 
     def stop_all(self) -> None:
         errors = []
@@ -121,8 +123,8 @@ class Machine:
                 except Exception as exc:
                     errors.append(f"{name}: {exc}")
 
-            if roller_stopped:
-                self._notify_external_roller_stop()
+        if roller_stopped:
+            self._notify_external_roller_stop()
 
         if errors:
             raise RuntimeError("Failed to stop drives: " + "; ".join(errors))
@@ -135,6 +137,7 @@ class Machine:
             self._roller_external_stop_callback = callback
 
     def _notify_external_roller_stop(self) -> None:
-        # Вызывается при уже удерживаемом _roller_lock.
-        if self._roller_external_stop_callback is not None:
-            self._roller_external_stop_callback()
+        with self._roller_lock:
+            callback = self._roller_external_stop_callback
+        if callback is not None:
+            callback()
