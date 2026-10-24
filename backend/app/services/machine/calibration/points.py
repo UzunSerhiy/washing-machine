@@ -8,3 +8,4 @@ class CalibrationPoint(str, Enum):
     MATERIAL_END = "material_end"
 
     WASHING_STOP = "washing_stop"
+    WATER_START = "water_start"

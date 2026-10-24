@@ -18,6 +18,23 @@ def get_drive_service() -> DriveService:
     return drive_service
 
 
+def require_direct_drive_access(drive_id: int) -> None:
+    service = get_drive_service()
+    config = service.configs.get(drive_id)
+
+    if config is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Drive {drive_id} is not configured",
+        )
+
+    if config.type == "ROLLER":
+        raise HTTPException(
+            status_code=409,
+            detail=("Direct roller control is disabled. Use /api/machine endpoints."),
+        )
+
+
 @router.get("", response_model=list[DriveResponse])
 def get_drives():
     drive_service = get_drive_service()
@@ -143,6 +160,7 @@ async def get_drive_fault(drive_id: int):
 
 @router.post("/{drive_id}/frequency")
 async def set_drive_frequency(drive_id: int, data: DriveFrequencyRequest):
+    require_direct_drive_access(drive_id)
     service = get_drive_service()
 
     try:
@@ -164,6 +182,7 @@ async def set_drive_frequency(drive_id: int, data: DriveFrequencyRequest):
 
 @router.post("/{drive_id}/run/forward")
 async def run_drive_forward(drive_id: int):
+    require_direct_drive_access(drive_id)
     service = get_drive_service()
 
     try:
@@ -185,8 +204,9 @@ async def run_drive_forward(drive_id: int):
         ) from exc
 
 
-@router.post("{drive_id}/run/reverse")
+@router.post("/{drive_id}/run/reverse")
 async def run_drive_reverse(drive_id: int):
+    require_direct_drive_access(drive_id)
     service = get_drive_service()
 
     try:

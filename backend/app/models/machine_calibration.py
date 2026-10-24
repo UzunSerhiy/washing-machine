@@ -30,4 +30,9 @@ class MachineCalibrationSettings(Base):
         nullable=True,
     )
 
+    water_start_turns: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+
     machine: Mapped["Machine"] = relationship(back_populates="calibration")

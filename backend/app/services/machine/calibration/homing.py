@@ -29,6 +29,7 @@ class HomingService:
         self._start_position: float | None = None
         self._initial_pulses: int | None = None
         self._last_sequence: int | None = None
+        self._initial_generation: int | None = None
         self._sensor_was_released = False
 
     def start(self, now: float, position_turns: float) -> None:
@@ -39,6 +40,7 @@ class HomingService:
 
         if not sensor.connected:
             raise RuntimeError("Reference sensor is disconnected")
+
         if sensor.triggered:
             raise RuntimeError("Release reference sensor before homing")
 
@@ -49,7 +51,8 @@ class HomingService:
         self._start_position = position_turns
         self._initial_pulses = sensor.pulses
         self._last_sequence = sensor.sequence
-        self._sensor_was_released = not sensor.triggered
+        self._initial_generation = sensor.generation
+        self._sensor_was_released = True
 
     def update(self, now: float, position_turns: float) -> None:
         if self.state != HomingState.SEARCHING:
@@ -59,6 +62,24 @@ class HomingService:
 
         if not sensor.connected:
             self._fail("Reference sensor disconnected")
+            return
+
+        if sensor.generation != self._initial_generation:
+            self._fail("ESP32 connection changed during homing")
+            return
+
+        if (
+            self._last_sequence is not None
+            and sensor.sequence < self._last_sequence
+        ):
+            self._fail("ESP32 sequence reset during homing")
+            return
+
+        if (
+            self._initial_pulses is not None
+            and sensor.pulses < self._initial_pulses
+        ):
+            self._fail("ESP32 pulse counter reset during homing")
             return
 
         if self._started_at is None or self._start_position is None:
@@ -98,6 +119,7 @@ class HomingService:
         self._start_position = None
         self._initial_pulses = None
         self._last_sequence = None
+        self._initial_generation = None
         self._sensor_was_released = False
 
     def cancel(self) -> None:

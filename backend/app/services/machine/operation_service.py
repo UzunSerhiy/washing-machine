@@ -9,6 +9,7 @@ class MachineOperationService:
         self.machine = machine
         self.state = MachineOperationState()
         self.speed_layer = speed_layer or SpeedLayer()
+        self.roller_homing_service = None
 
     def get_manual_roller_frequency(self) -> float:
         speed_percent = self.state.roller_speed_percent
@@ -27,6 +28,11 @@ class MachineOperationService:
         return self.speed_layer.brush_frequency(speed_percent)
 
     def set_manual_mode(self) -> None:
+        if (
+            self.roller_homing_service is not None
+            and self.roller_homing_service.searching
+        ):
+            raise RuntimeError("Cannot change mode while roller homing is active")
         self._stop_for_mode_change()
 
         self.state.mode = OperationMode.MANUAL
@@ -34,6 +40,12 @@ class MachineOperationService:
         self.state.material_profile_id = None
 
     def set_auto_mode(self, material_profile_id: int) -> None:
+        if (
+            self.roller_homing_service is not None
+            and self.roller_homing_service.searching
+        ):
+            raise RuntimeError("Cannot change mode while roller homing is active")
+
         if material_profile_id <= 0:
             raise ValueError("Material profile ID must be greater than zero")
 
@@ -44,6 +56,12 @@ class MachineOperationService:
         self.state.material_profile_id = material_profile_id
 
     def set_calibration_mode(self, material_profile_id: int) -> None:
+        if (
+            self.roller_homing_service is not None
+            and self.roller_homing_service.searching
+        ):
+            raise RuntimeError("Cannot change mode while roller homing is active")
+
         if material_profile_id <= 0:
             raise ValueError("Material profile ID must be greater than zero")
 
@@ -99,6 +117,9 @@ class MachineOperationService:
     def start_manual_roller_forward(self) -> None:
         self._require_manual_mode()
 
+        if self.roller_homing_service is not None:
+            self.roller_homing_service.invalidate()
+
         frequency_hz = self.get_manual_roller_frequency()
 
         self.machine.start_roller_forward(frequency_hz)
@@ -107,6 +128,9 @@ class MachineOperationService:
 
     def start_manual_roller_reverse(self) -> None:
         self._require_manual_mode()
+
+        if self.roller_homing_service is not None:
+            self.roller_homing_service.invalidate()
 
         frequency_hz = self.get_manual_roller_frequency()
 
@@ -136,6 +160,9 @@ class MachineOperationService:
         self.machine.stop_brush()
 
         self.state.brush_running = False
+
+    def set_roller_homing_service(self, service) -> None:
+        self.roller_homing_service = service
 
     def _stop_for_mode_change(self) -> None:
         self.machine.stop_all()

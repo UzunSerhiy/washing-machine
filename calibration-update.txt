@@ -1,0 +1,974 @@
+
+========== backend/app/services/machine/calibration/session_service.py ==========
+from typing import Protocol
+
+from app.services.machine.calibration.clock import MonotonicClock
+from app.services.machine.calibration.points import CalibrationPoint
+from app.services.machine.calibration.session import CalibrationSession
+from app.services.machine.machine import Machine
+from app.services.winding.rotation import RollerRotationCalculator
+from app.services.machine.calibration.stage import CalibrationStage
+from app.services.machine.calibration.homing import HomingService, HomingState
+from app.services.machine.sensors.service import RollerSensorService
+
+
+class Clock(Protocol):
+    def now(self) -> float: ...
+
+
+class CalibrationSessionService:
+    def __init__(
+        self,
+        machine: Machine,
+        rotation_calculator: RollerRotationCalculator,
+        clock: Clock | None = None,
+        sensor_service: RollerSensorService | None = None,
+    ):
+        self.machine = machine
+        self.rotation_calculator = rotation_calculator
+        self.clock = clock or MonotonicClock()
+
+        self._session: CalibrationSession | None = None
+        self._last_update_time: float | None = None
+        self.homing = (
+            HomingService(sensor_service) if sensor_service is not None else None
+        )
+
+    @property
+    def active(self) -> bool:
+        return self._session is not None
+
+    def start(self, material_profile_id: int) -> CalibrationSession:
+        if self._session is not None:
+            raise RuntimeError("Calibration session is already active")
+
+        if self.homing is not None:
+            self.homing.reset()
+
+        self._session = CalibrationSession(
+            machine=self.machine,
+            rotation_calculator=self.rotation_calculator,
+            material_profile_id=material_profile_id,
+        )
+
+        return self._session
+
+    def get_current(self) -> CalibrationSession:
+        if self._session is None:
+            raise RuntimeError("Calibration session is not active")
+
+        return self._session
+
+    def jog_forward(self, frequency_hz: float) -> None:
+        self._ensure_not_homing()
+        session = self.get_current()
+
+        self._sync_position()
+
+        session.player.start_jog_forward(frequency_hz)
+        self._last_update_time = self.clock.now()
+
+    def jog_reverse(self, frequency_hz: float) -> None:
+        self._ensure_not_homing()
+        session = self.get_current()
+
+        self._sync_position()
+
+        session.player.start_jog_reverse(frequency_hz)
+        self._last_update_time = self.clock.now()
+
+    def pause(self) -> None:
+        self._ensure_not_homing()
+        session = self.get_current()
+        self._sync_position()
+
+        session.player.pause()
+        self._last_update_time = None
+
+    def stop(self) -> None:
+        session = self.get_current()
+
+        if self.homing is not None:
+            self.homing.cancel()
+
+        try:
+            self._sync_position()
+        finally:
+            session.player.stop()
+            self._last_update_time = None
+
+    def reset_position(self) -> None:
+        self._ensure_not_homing()
+        session = self.get_current()
+
+        self._sync_position()
+        session.confirm_zero()
+        self._last_update_time = None
+
+    def mark(self, point: CalibrationPoint) -> None:
+        self._ensure_not_homing()
+        session = self.get_current()
+        self._sync_position()
+        session.set_point(point)
+
+    def cancel(self) -> None:
+        if self._session is None:
+            return
+
+        if self.homing is not None:
+            self.homing.cancel()
+
+        try:
+            self._sync_position()
+        finally:
+            self._session.player.stop()
+            self._last_update_time = None
+            self._session = None
+
+    def complete(self) -> CalibrationSession:
+        self._ensure_not_homing()
+        session = self.get_current()
+
+        self._sync_position()
+        session.player.stop()
+        self._last_update_time = None
+
+        session.validate()
+
+        return session
+
+    def tick(self) -> None:
+        if self._session is None:
+            return
+
+        try:
+            self._sync_position()
+            self._update_homing()
+        except Exception:
+            if self.homing is not None:
+                self.homing.cancel()
+
+            self._last_update_time = None
+            self._session.player.stop()
+            raise
+
+        if not self._session.player.running:
+            self._last_update_time = None
+
+    def _sync_position(self) -> None:
+        session = self.get_current()
+
+        if self._last_update_time is None:
+            return
+
+        now = self.clock.now()
+        elapsed_seconds = now - self._last_update_time
+
+        if elapsed_seconds < 0:
+            raise RuntimeError("Clock moved backwards")
+
+        session.player.update(elapsed_seconds)
+
+        self._last_update_time = now
+
+    def finish(self) -> None:
+        session = self.get_current()
+
+        if session.player.running:
+            raise RuntimeError("Cannot finish calibration while roller is running")
+
+        self._session = None
+        self._last_update_time = None
+
+    def start_brush(self, frequency_hz: float) -> None:
+        self._ensure_not_homing()
+        session = self.get_current()
+        session.player.start_brush(frequency_hz)
+
+    def stop_brush(self) -> None:
+        session = self.get_current()
+        session.player.stop_brush()
+
+    def start_homing(self, frequency_hz: float) -> None:
+        session = self.get_current()
+
+        if self.homing is None:
+            raise RuntimeError("Reference sensor is not configured")
+
+        if session.stage != CalibrationStage.SET_ZERO:
+            raise RuntimeError("Homing is only available at SET_ZERO stage")
+
+        if session.player.running or session.player.brush_running:
+            raise RuntimeError("Stop roller and brushes before homing")
+
+        if frequency_hz <= 0:
+            raise ValueError("Homing frequency must be positive")
+
+        now = self.clock.now()
+
+        self.homing.start(
+            now=now,
+            position_turns=session.position_turns,
+        )
+
+        try:
+            session.player.start_jog_reverse(frequency_hz)
+        except Exception:
+            self.homing.cancel()
+            session.player.stop()
+            raise
+
+        self._last_update_time = now
+
+    def _update_homing(self) -> None:
+        if self.homing is None:
+            return
+
+        if self.homing.state != HomingState.SEARCHING:
+            return
+
+        session = self.get_current()
+
+        try:
+            self.homing.update(
+                now=self.clock.now(),
+                position_turns=session.position_turns,
+            )
+        except Exception:
+            self.homing.cancel()
+            session.player.stop()
+            self._last_update_time = None
+            raise
+
+        if self.homing.state == HomingState.SEARCHING:
+            return
+
+        try:
+            session.player.stop()
+        finally:
+            self._last_update_time = None
+
+        if self.homing.state == HomingState.COMPLETED:
+            session.confirm_zero()
+
+    def _ensure_not_homing(self) -> None:
+        if self.homing is not None and self.homing.state == HomingState.SEARCHING:
+            raise RuntimeError("Homing is running")
+
+========== backend/app/services/machine/calibration/session.py ==========
+from app.services.machine.calibration.machine import MachineCalibration
+from app.services.machine.calibration.player import CalibrationPlayer
+from app.services.machine.calibration.points import CalibrationPoint
+from app.services.machine.calibration.position import RollerPositionTracker
+from app.services.machine.calibration.store import CalibrationPointStore
+from app.services.machine.calibration.winding import WindingCalibration
+from app.services.machine.machine import Machine
+from app.services.winding.rotation import RollerRotationCalculator
+from app.services.machine.calibration.stage import CalibrationStage
+
+
+class CalibrationSession:
+    def __init__(
+        self,
+        machine: Machine,
+        rotation_calculator: RollerRotationCalculator,
+        material_profile_id: int,
+    ):
+        if material_profile_id <= 0:
+            raise ValueError("Material profile ID must be greater than zero")
+
+        self.material_profile_id = material_profile_id
+        self.store = CalibrationPointStore()
+        self.position_tracker = RollerPositionTracker()
+        self.machine_calibration = MachineCalibration(store=self.store)
+        self.winding_calibration = WindingCalibration(store=self.store)
+        self.stage = CalibrationStage.SET_ZERO
+        self.player = CalibrationPlayer(
+            machine=machine,
+            position_tracker=self.position_tracker,
+            rotation_calculator=rotation_calculator,
+            calibration_store=self.store,
+            stage_getter=lambda: self.stage,
+        )
+
+    @property
+    def position_turns(self) -> float:
+        return self.position_tracker.position_turns
+
+    def set_point(self, point: CalibrationPoint) -> None:
+        if self.player.running:
+            raise RuntimeError("Stop roller before marking a point")
+
+        turns = self.position_turns
+
+        if self.stage == CalibrationStage.MATERIAL_START:
+            if point != CalibrationPoint.MATERIAL_START:
+                raise ValueError("Expected material_start point")
+
+            if turns <= 0:
+                raise ValueError("Material start must be after zero")
+
+            self.machine_calibration.set_material_start(turns)
+            self.stage = CalibrationStage.MATERIAL_END
+            return
+
+        if self.stage == CalibrationStage.MATERIAL_END:
+            if point != CalibrationPoint.MATERIAL_END:
+                raise ValueError("Expected material_end point")
+
+            material_start = self.machine_calibration.material_start_turns
+
+            if material_start is None or turns <= material_start:
+                raise ValueError("Material end must be after material start")
+
+            self.winding_calibration.set_material_end(turns)
+            self.stage = CalibrationStage.READY_TO_UNWIND
+            return
+
+        raise RuntimeError(f"Cannot mark calibration point at stage {self.stage.value}")
+
+    def is_complete(self) -> bool:
+        return (
+            self.machine_calibration.is_complete()
+            and self.winding_calibration.is_complete()
+        )
+
+    def validate(self) -> None:
+        self.machine_calibration.validate()
+        self.winding_calibration.validate()
+
+        washing_stop = self.machine_calibration.washing_stop_turns
+        material_start = self.machine_calibration.material_start_turns
+        material_end = self.winding_calibration.material_end_turns
+
+        if washing_stop is None or material_start is None or material_end is None:
+            raise ValueError("Calibration is incomplete")
+
+        if material_end <= material_start:
+            raise ValueError("Material end point must be after material start point")
+
+    def confirm_zero(self) -> None:
+        if self.stage != CalibrationStage.SET_ZERO:
+            raise RuntimeError("Zero position is already confirmed")
+
+        if self.player.running:
+            raise RuntimeError("Stop roller before setting zero")
+
+        if self.player.brush_running:
+            raise RuntimeError("Stop brushes before setting zero")
+
+        self.player.reset_position()
+        self.stage = CalibrationStage.MATERIAL_START
+
+========== backend/app/services/machine/calibration/stage.py ==========
+from enum import Enum
+
+
+class CalibrationStage(str, Enum):
+    SET_ZERO = "set_zero"
+    MATERIAL_START = "material_start"
+    MATERIAL_END = "material_end"
+    READY_TO_UNWIND = "ready_to_unwind"
+
+========== backend/app/services/machine/calibration/machine.py ==========
+from app.services.machine.calibration.points import CalibrationPoint
+from app.services.machine.calibration.store import CalibrationPointStore
+
+
+class MachineCalibration:
+    def __init__(self, store: CalibrationPointStore | None = None):
+        self.store = store or CalibrationPointStore()
+        self._material_start_turns: float | None = None
+        self._washing_stop_turns: float | None = None
+
+    @property
+    def material_start_turns(self) -> float | None:
+        return self._material_start_turns
+
+    @property
+    def washing_stop_turns(self) -> float | None:
+        return self._washing_stop_turns
+
+    def set_material_start(self, turns: float) -> None:
+        self._validate_turns(turns)
+        self._material_start_turns = turns
+        self.store.set(CalibrationPoint.MATERIAL_START, turns)
+
+    def set_washing_stop(self, turns: float) -> None:
+        self._validate_turns(turns)
+        self._washing_stop_turns = turns
+        self.store.set(CalibrationPoint.WASHING_STOP, turns)
+
+    def set_point(self, point: CalibrationPoint, turns: float) -> None:
+        if point == CalibrationPoint.MATERIAL_START:
+            self.set_material_start(turns)
+            return
+
+        if point == CalibrationPoint.WASHING_STOP:
+            self.set_washing_stop(turns)
+            return
+
+        raise ValueError("Point does not belong to machine calibration")
+
+    def is_complete(self) -> bool:
+        return (
+            self._material_start_turns is not None
+            and self._washing_stop_turns is not None
+        )
+
+    def validate(self) -> None:
+        if self._material_start_turns is None:
+            raise ValueError("Material start point is not calibrated")
+
+        if self._washing_stop_turns is None:
+            raise ValueError("Washing stop point is not calibrated")
+
+        if self._washing_stop_turns <= 0:
+            raise ValueError("Washing stop point must be after POINT_0")
+
+        if self._material_start_turns <= self._washing_stop_turns:
+            raise ValueError("Material start point must be after washing stop point")
+
+    @staticmethod
+    def _validate_turns(turns: float) -> None:
+        if turns < 0:
+            raise ValueError("Turns cannot be negative")
+
+========== backend/app/services/machine/calibration/player.py ==========
+from app.services.machine.machine import Machine
+from app.services.machine.calibration.position import RollerPositionTracker
+from app.services.winding.rotation import RollerRotationCalculator
+from app.services.machine.calibration.points import CalibrationPoint
+from app.services.machine.calibration.store import CalibrationPointStore
+from app.services.machine.calibration.stage import CalibrationStage
+from collections.abc import Callable
+
+
+class CalibrationPlayer:
+    def __init__(
+        self,
+        machine: Machine,
+        position_tracker: RollerPositionTracker,
+        rotation_calculator: RollerRotationCalculator,
+        calibration_store: CalibrationPointStore | None = None,
+        stage_getter: Callable[[], CalibrationStage] | None = None,
+    ):
+        self.machine = machine
+        self.position_tracker = position_tracker
+        self.rotation_calculator = rotation_calculator
+        self.calibration_store = calibration_store
+
+        self._running = False
+        self._paused = False
+        self._direction: str | None = None
+        self._frequency_hz: float | None = None
+        self._brush_running = False
+        self._brush_frequency_hz: float | None = None
+        self._stage_getter = stage_getter
+
+    @property
+    def running(self) -> bool:
+        return self._running
+
+    @property
+    def paused(self) -> bool:
+        return self._paused
+
+    @property
+    def direction(self) -> str | None:
+        return self._direction
+
+    @property
+    def frequency_hz(self) -> float | None:
+        return self._frequency_hz
+
+    @property
+    def position_turns(self) -> float:
+        return self.position_tracker.position_turns
+
+    @property
+    def brush_running(self) -> bool:
+        return self._brush_running
+
+    @property
+    def brush_frequency_hz(self) -> float | None:
+        return self._brush_frequency_hz
+
+    def start_brush(self, frequency_hz: float) -> None:
+        self._validate_frequency(frequency_hz)
+
+        self.machine.start_brush(frequency_hz)
+
+        self._brush_running = True
+        self._brush_frequency_hz = frequency_hz
+
+    def stop_brush(self) -> None:
+        self.machine.stop_brush()
+
+        self._brush_running = False
+        self._brush_frequency_hz = None
+
+    def start_jog_forward(self, frequency_hz: float) -> None:
+        self._validate_frequency(frequency_hz)
+
+        self.machine.start_roller_forward(frequency_hz)
+
+        self._running = True
+        self._paused = False
+        self._direction = "forward"
+        self._frequency_hz = frequency_hz
+
+    def start_jog_reverse(self, frequency_hz: float) -> None:
+        self._validate_frequency(frequency_hz)
+
+        self.machine.start_roller_reverse(frequency_hz)
+
+        self._running = True
+        self._paused = False
+        self._direction = "reverse"
+        self._frequency_hz = frequency_hz
+
+    def stop(self) -> None:
+        try:
+            self.machine.stop_all()
+        finally:
+            self._running = False
+            self._paused = False
+            self._direction = None
+            self._frequency_hz = None
+
+            self._brush_running = False
+            self._brush_frequency_hz = None
+
+    def pause(self) -> None:
+        if not self._running:
+            return
+
+        self.machine.stop_roller()
+
+        self._running = False
+        self._paused = True
+
+    def reset_position(self) -> None:
+        self.position_tracker.reset()
+
+    def update(self, elapsed_seconds: float) -> None:
+        if elapsed_seconds < 0:
+            raise ValueError("Elapsed seconds cannot be negative")
+
+        if not self._running:
+            return
+
+        if self._frequency_hz is None:
+            return
+
+        revolutions = self.rotation_calculator.revolutions_for_time(
+            self._frequency_hz,
+            elapsed_seconds,
+        )
+
+        if self._direction == "forward":
+            self.position_tracker.move_forward(revolutions)
+        elif self._direction == "reverse":
+            allow_negative = (
+                self._stage_getter is not None
+                and self._stage_getter() == CalibrationStage.SET_ZERO
+            )
+
+            if allow_negative:
+                self.position_tracker.move_reverse(
+                    revolutions,
+                    allow_negative=True,
+                )
+                return
+
+            current_position = self.position_tracker.position_turns
+
+            if revolutions >= current_position:
+                self.position_tracker.reset()
+                self.machine.stop_roller()
+
+                self._running = False
+                self._paused = False
+                self._direction = None
+                self._frequency_hz = None
+                return
+
+            self.position_tracker.move_reverse(revolutions)
+
+    def save_point(self, point: CalibrationPoint) -> None:
+        if self.calibration_store is None:
+            raise RuntimeError("Calibration store is not configured")
+
+        self.calibration_store.set(point, self.position_turns)
+
+    @staticmethod
+    def _validate_frequency(frequency_hz: float) -> None:
+        if frequency_hz <= 0:
+            raise ValueError("Frequency must be greater than zero")
+
+========== frontend/hooks/use-calibration.ts ==========
+"use client";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
+import {
+  getCalibrationSession,
+  startCalibration,
+  jogCalibration,
+  calibrationAction,
+  markCalibrationPoint,
+  completeCalibration,
+  cancelCalibration,
+  startCalibrationBrush,
+  stopCalibrationBrush,
+  getCalibrationHome,
+  startCalibrationHome,
+  getRollerReference,
+} from "@/lib/calibration-api";
+
+import type {
+  CalibrationPoint,
+  CalibrationJogDirection,
+} from "@/types/calibration";
+
+const KEY = ["calibration-session"];
+
+export function useCalibrationSession(enabled = true) {
+  return useQuery({
+    queryKey: KEY,
+    queryFn: getCalibrationSession,
+    enabled,
+    retry: false,
+    refetchInterval: 300,
+  });
+}
+
+function useCalibrationMutation<T>(
+  mutationFn: (variables: T) => Promise<unknown>,
+) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: KEY });
+      await queryClient.invalidateQueries({ queryKey: ["machine"] });
+    },
+  });
+}
+
+export function useStartCalibration() {
+  return useCalibrationMutation(startCalibration);
+}
+
+export function useJogCalibration() {
+  return useCalibrationMutation(
+    (params: { direction: CalibrationJogDirection; frequencyHz: number }) =>
+      jogCalibration(params.direction, params.frequencyHz),
+  );
+}
+
+export function useCalibrationAction() {
+  return useCalibrationMutation(calibrationAction);
+}
+
+export function useMarkCalibrationPoint() {
+  return useCalibrationMutation((point: CalibrationPoint) =>
+    markCalibrationPoint(point),
+  );
+}
+
+export function useCompleteCalibration() {
+  return useCalibrationMutation(completeCalibration);
+}
+
+export function useCancelCalibration() {
+  return useCalibrationMutation(cancelCalibration);
+}
+
+export function useStartCalibrationBrush() {
+  return useCalibrationMutation(startCalibrationBrush);
+}
+
+export function useStopCalibrationBrush() {
+  return useCalibrationMutation(stopCalibrationBrush);
+}
+
+
+export function useCalibrationHome() {
+  return useQuery({
+    queryKey: ["calibration-home"],
+    queryFn: getCalibrationHome,
+    retry: false,
+    refetchInterval: 300,
+  });
+}
+
+export function useRollerReference() {
+  return useQuery({
+    queryKey: ["roller-reference"],
+    queryFn: getRollerReference,
+    retry: false,
+    refetchInterval: 300,
+  });
+}
+
+export function useStartCalibrationHome() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: startCalibrationHome,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["calibration-home"] });
+      await queryClient.invalidateQueries({ queryKey: KEY });
+    },
+  });
+}
+
+========== frontend/lib/calibration-api.ts ==========
+import { api } from "@/lib/api";
+
+import type {
+  CalibrationSession,
+  CalibrationPoint,
+  CalibrationJogDirection,
+  CalibrationCompleteResponse,
+  CalibrationHomeStatus,
+  RollerReferenceState,
+} from "@/types/calibration";
+
+const BASE = "/api/machine/calibration";
+
+export async function getCalibrationSession() {
+  const response = await api.get<CalibrationSession>(BASE);
+  return response.data;
+}
+
+export async function startCalibration(materialProfileId: number) {
+  const response = await api.post<CalibrationSession>(`${BASE}/start`, {
+    material_profile_id: materialProfileId,
+  });
+
+  return response.data;
+}
+
+export async function jogCalibration(
+  direction: CalibrationJogDirection,
+  frequencyHz: number,
+) {
+  const response = await api.post<CalibrationSession>(
+    `${BASE}/jog/${direction}`,
+    { frequency_hz: frequencyHz },
+  );
+
+  return response.data;
+}
+
+export async function calibrationAction(
+  action: "pause" | "stop" | "reset-position",
+) {
+  const response = await api.post<CalibrationSession>(`${BASE}/${action}`);
+
+  return response.data;
+}
+
+export async function markCalibrationPoint(point: CalibrationPoint) {
+  const response = await api.post<CalibrationSession>(`${BASE}/mark`, {
+    point,
+  });
+
+  return response.data;
+}
+
+export async function completeCalibration() {
+  const response = await api.post<CalibrationCompleteResponse>(
+    `${BASE}/complete`,
+  );
+
+  return response.data;
+}
+
+export async function cancelCalibration() {
+  const response = await api.post<{ status: string }>(`${BASE}/cancel`);
+
+  return response.data;
+}
+
+export async function startCalibrationBrush(frequencyHz: number) {
+  const response = await api.post<CalibrationSession>(`${BASE}/brush/start`, {
+    frequency_hz: frequencyHz,
+  });
+
+  return response.data;
+}
+
+export async function stopCalibrationBrush() {
+  const response = await api.post<CalibrationSession>(`${BASE}/brush/stop`);
+
+  return response.data;
+}
+
+
+export async function getCalibrationHome() {
+  const response = await api.get<CalibrationHomeStatus>(`${BASE}/home`);
+  return response.data;
+}
+
+export async function startCalibrationHome() {
+  const response = await api.post(`${BASE}/home`, {
+    frequency_hz: 2,
+    position_confirmed: true,
+  });
+  return response.data;
+}
+
+export async function getRollerReference() {
+  const response = await api.get<RollerReferenceState>(
+    "/api/machine/sensors/roller-reference",
+  );
+  return response.data;
+}
+
+========== frontend/types/calibration.ts ==========
+export interface CalibrationSession {
+  active: boolean;
+  material_profile_id: number | null;
+  stage:
+    | "set_zero"
+    | "material_start"
+    | "material_end"
+    | "ready_to_unwind"
+    | null;
+
+  position_turns: number;
+  running: boolean;
+  paused: boolean;
+  direction: string | null;
+  frequency_hz: number | null;
+
+  brush_running: boolean;
+  brush_frequency_hz: number | null;
+
+  washing_stop_turns: number | null;
+  material_start_turns: number | null;
+  material_end_turns: number | null;
+}
+
+export type CalibrationPoint =
+  | "washing_stop"
+  | "material_start"
+  | "material_end";
+
+export type CalibrationJogDirection = "forward" | "reverse";
+
+export interface CalibrationCompleteResponse {
+  status: string;
+  machine_id: number;
+  material_profile_id: number;
+}
+
+
+export interface CalibrationHomeStatus {
+  available: boolean;
+  state: "idle" | "searching" | "completed" | "cancelled" | "error" | null;
+  error: string | null;
+}
+
+export interface RollerReferenceState {
+  connected: boolean;
+  triggered: boolean;
+  pulses: number;
+  sequence: number;
+}
+
+========== backend/app/schemas/machine.py ==========
+from pydantic import BaseModel
+from app.services.machine.operation import AutoStage, OperationMode
+from app.services.machine.calibration.points import CalibrationPoint
+from app.services.machine.calibration.stage import CalibrationStage
+
+
+class MachineDriveResponse(BaseModel):
+    id: int
+    name: str
+    address: int
+    type: str
+    position: str | None
+    enabled: bool
+
+    status: int
+    frequency_hz: float
+    fault: int
+
+
+class MachineResponse(BaseModel):
+    id: int
+    name: str
+    description: str | None
+    is_active: bool
+    drives: list[MachineDriveResponse]
+
+
+class MachineOperationResponse(BaseModel):
+    mode: OperationMode
+    auto_stage: AutoStage | None
+    material_profile_id: int | None
+
+    roller_speed_percent: float | None
+    brush_speed_percent: float | None
+
+    roller_running: bool
+    brush_running: bool
+
+    running: bool
+    paused: bool
+
+
+class ManualSpeedRequest(BaseModel):
+    speed_percent: float
+
+
+class MaterialModeRequest(BaseModel):
+    material_profile_id: int
+
+
+class CalibrationStartRequest(BaseModel):
+    material_profile_id: int
+
+
+class CalibrationSessionResponse(BaseModel):
+    active: bool
+    material_profile_id: int | None = None
+    stage: CalibrationStage | None = None
+
+    position_turns: float = 0.0
+    running: bool = False
+    paused: bool = False
+    direction: str | None = None
+    frequency_hz: float | None = None
+
+    brush_running: bool = False
+    brush_frequency_hz: float | None = None
+
+    washing_stop_turns: float | None = None
+    material_start_turns: float | None = None
+    material_end_turns: float | None = None
+
+
+class CalibrationJogRequest(BaseModel):
+    frequency_hz: float
+
+
+class CalibrationMarkRequest(BaseModel):
+    point: CalibrationPoint
+
+
+class AutoSpeedSettingsResponse(BaseModel):
+    stage: AutoStage
+    speed_percent: float
+    brush_speed_percent: float | None
+
+
+class AutoSpeedRequest(BaseModel):
+    speed_percent: float

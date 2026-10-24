@@ -69,14 +69,24 @@ class CalibrationSessionResponse(BaseModel):
     washing_stop_turns: float | None = None
     material_start_turns: float | None = None
     material_end_turns: float | None = None
+    saved: bool = False
+    auto_mode: str | None = None
+    water_start_turns: float | None = None
+
+
+class CalibrationNextRequest(BaseModel):
+    roller_frequency_hz: float
+    brush_frequency_hz: float
 
 
 class CalibrationJogRequest(BaseModel):
     frequency_hz: float
+    brush_frequency_hz: float | None = None
 
 
 class CalibrationMarkRequest(BaseModel):
     point: CalibrationPoint
+    brush_frequency_hz: float | None = None
 
 
 class AutoSpeedSettingsResponse(BaseModel):

@@ -20,3 +20,14 @@ frontend/*.tsbuildinfo
 
 # Environment
 .env
+
+# Archives and backups
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.bak
+*.backup
+*.old
+*.orig
+

@@ -7,6 +7,9 @@ import { useMaterialProfiles } from "@/hooks/use-material-profiles";
 
 import {
   useCalibrationSession,
+  useAutoWindCalibration,
+  useResumeCalibration,
+  useNextCalibrationStep,
   useStartCalibration,
   useJogCalibration,
   useCalibrationAction,
@@ -18,6 +21,7 @@ import {
   useCalibrationHome,
   useRollerReference,
   useStartCalibrationHome,
+  useSaveCalibrationGeometry,
 } from "@/hooks/use-calibration";
 
 import { Button } from "@/components/ui/button";
@@ -46,7 +50,7 @@ function formatTurns(value: number | null | undefined) {
   return value == null ? "—" : value.toFixed(4);
 }
 
-const ROLLER_MAX_FREQUENCY_HZ = 10;
+const ROLLER_MAX_FREQUENCY_HZ = 50;
 
 function percentToHz(percent: number): number {
   return (percent / 100) * ROLLER_MAX_FREQUENCY_HZ;
@@ -73,6 +77,9 @@ export default function CalibrationPage() {
   const startHome = useStartCalibrationHome();
 
   const start = useStartCalibration();
+  const nextStep = useNextCalibrationStep();
+  const autoWind = useAutoWindCalibration();
+  const resume = useResumeCalibration();
   const jog = useJogCalibration();
   const action = useCalibrationAction();
   const mark = useMarkCalibrationPoint();
@@ -86,8 +93,14 @@ export default function CalibrationPage() {
   const startBrush = useStartCalibrationBrush();
   const stopBrush = useStopCalibrationBrush();
 
+  const [finalDiameter, setFinalDiameter] = useState("");
+  const saveGeometry = useSaveCalibrationGeometry();
+
   const busy =
     start.isPending ||
+    nextStep.isPending ||
+    autoWind.isPending ||
+    resume.isPending ||
     jog.isPending ||
     action.isPending ||
     mark.isPending ||
@@ -95,7 +108,8 @@ export default function CalibrationPage() {
     cancel.isPending ||
     startBrush.isPending ||
     stopBrush.isPending ||
-    startHome.isPending;
+    startHome.isPending ||
+    saveGeometry.isPending;
 
   const canComplete =
     active &&
@@ -104,7 +118,10 @@ export default function CalibrationPage() {
     !session?.brush_running &&
     session?.material_start_turns != null &&
     session?.material_end_turns != null &&
-    session?.washing_stop_turns != null;
+    session?.washing_stop_turns != null &&
+    session?.water_start_turns != null &&
+    session?.stage === "washing_stop" &&
+    !session?.saved;
 
   async function execute(fn: () => Promise<unknown>) {
     setError(null);
@@ -144,6 +161,10 @@ export default function CalibrationPage() {
       jog.mutateAsync({
         direction,
         frequencyHz,
+        brushFrequencyHz:
+          stage === "water_start" && direction === "reverse"
+            ? brushPercentToHz(brushSpeedPercent)
+            : undefined,
       }),
     );
   }
@@ -165,8 +186,10 @@ export default function CalibrationPage() {
     { key: "set_zero", label: "Установка нуля" },
     { key: "material_start", label: "Начало материала" },
     { key: "material_end", label: "Конец материала" },
+    { key: "water_start", label: "Точка включения воды" },
     { key: "ready_to_unwind", label: "Автоматическая отмотка" },
     { key: "washing_stop", label: "Конец мойки" },
+    { key: "rewind_complete", label: "Автонамотка завершена" },
   ];
 
   const currentStepIndex = steps.findIndex((step) => step.key === stage);
@@ -175,7 +198,35 @@ export default function CalibrationPage() {
     active &&
     !homingActive &&
     !busy &&
-    ["set_zero", "material_start", "material_end"].includes(stage ?? "");
+    [
+      "set_zero",
+      "material_start",
+      "material_end",
+      "water_start",
+      "washing_stop",
+    ].includes(stage ?? "") &&
+    !session?.saved &&
+    !session?.running &&
+    !session?.auto_mode;
+
+  const atUpper =
+    stage === "water_start"
+      ? session?.material_end_turns
+      : stage === "washing_stop"
+        ? session?.material_start_turns
+        : null;
+  const atLower =
+    stage === "water_start"
+      ? session?.material_start_turns
+      : stage === "washing_stop"
+        ? 0
+        : null;
+  const canForward =
+    canJog &&
+    (atUpper == null || (session?.position_turns ?? 0) < atUpper - 0.000001);
+  const canReverse =
+    canJog &&
+    (atLower == null || (session?.position_turns ?? 0) > atLower + 0.000001);
 
   const currentAction = {
     set_zero: {
@@ -190,9 +241,24 @@ export default function CalibrationPage() {
       label: "Зафиксировать конец материала",
       description: "Сохранить текущую позицию конца материала",
     },
+    water_start: {
+      label: "Зафиксировать Water Start",
+      description:
+        "Первый Reverse запускает роллер и щётки. Pause останавливает оба. Затем точная настройка Forward/Reverse без щёток.",
+    },
+    washing_stop: {
+      label: "Зафиксировать конец мойки",
+      description:
+        "Установи позицию между нулём и началом материала и зафиксируй.",
+    },
     ready_to_unwind: {
-      label: "Начать автоматическую отмотку",
-      description: "Отмотать материал до точки начала",
+      label: "Авторазмотка до Material Start",
+      description:
+        "Роллер и щётки работают; при достижении Material Start остановятся.",
+    },
+    rewind_complete: {
+      label: "Автонамотка завершена",
+      description: "Роллер остановлен на Material End.",
     },
   }[stage ?? "set_zero"];
 
@@ -216,6 +282,12 @@ export default function CalibrationPage() {
       ready: session?.material_end_turns != null,
     },
     {
+      key: "water_start",
+      label: "Включение воды",
+      value: session?.water_start_turns,
+      ready: session?.water_start_turns != null,
+    },
+    {
       key: "washing_stop",
       label: "Конец мойки",
       value: session?.washing_stop_turns,
@@ -232,15 +304,28 @@ export default function CalibrationPage() {
         break;
 
       case "material_start":
-        await execute(() => mark.mutateAsync("material_start"));
+        await execute(() => mark.mutateAsync({ point: "material_start" }));
         break;
 
       case "material_end":
-        await execute(() => mark.mutateAsync("material_end"));
+        await execute(() => mark.mutateAsync({ point: "material_end" }));
         break;
 
+      case "water_start":
+        await execute(() =>
+          mark.mutateAsync({
+            point: "water_start",
+            brushFrequencyHz: brushPercentToHz(brushSpeedPercent),
+          }),
+        );
+        break;
       case "ready_to_unwind":
-        setError("Автоматическую отмотку подключим на следующем этапе");
+        setError(
+          "Авторазмотка запускается автоматически после фиксации Water Start",
+        );
+        break;
+      case "washing_stop":
+        await execute(() => mark.mutateAsync({ point: "washing_stop" }));
         break;
     }
   }
@@ -357,7 +442,18 @@ export default function CalibrationPage() {
             <Button
               className="w-full"
               size="lg"
-              disabled={!active || busy || session?.running}
+              disabled={
+                !active ||
+                busy ||
+                session?.running ||
+                !!session?.saved ||
+                stage === "ready_to_unwind" ||
+                stage === "rewind_complete" ||
+                (stage === "water_start" &&
+                  (session?.brush_running ||
+                    (session?.position_turns ?? 0) >=
+                      (session?.material_end_turns ?? 0)))
+              }
               onClick={handleCurrentAction}
             >
               {currentAction.label}
@@ -382,13 +478,9 @@ export default function CalibrationPage() {
                     ? "Нажат"
                     : "Отпущен"}
               </p>
-              <p>
-                Поиск: {homeQuery.data?.state ?? "—"}
-              </p>
+              <p>Поиск: {homeQuery.data?.state ?? "—"}</p>
               {homeQuery.data?.error && (
-                <p className="text-red-600">
-                  {homeQuery.data.error}
-                </p>
+                <p className="text-red-600">{homeQuery.data.error}</p>
               )}
             </div>
 
@@ -398,13 +490,11 @@ export default function CalibrationPage() {
                 className="mt-1"
                 checked={positionConfirmed}
                 disabled={homingActive}
-                onChange={(event) =>
-                  setPositionConfirmed(event.target.checked)
-                }
+                onChange={(event) => setPositionConfirmed(event.target.checked)}
               />
               <span>
-                Подтверждаю, что вал вручную установлен в диапазоне
-                от 0 до 1 оборота, а микрик отпущен.
+                Подтверждаю, что вал вручную установлен в диапазоне от 0 до 1
+                оборота, а микрик отпущен.
               </span>
             </label>
 
@@ -430,8 +520,8 @@ export default function CalibrationPage() {
             </Button>
 
             <p className="text-xs text-muted-foreground">
-              Поиск выполняется в обратном направлении.
-              Для остановки используй Stop ниже.
+              Поиск выполняется в обратном направлении. Для остановки используй
+              Stop ниже.
             </p>
           </CardContent>
         </Card>
@@ -466,11 +556,11 @@ export default function CalibrationPage() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <Button disabled={!canJog} onClick={() => handleJog("reverse")}>
+            <Button disabled={!canReverse} onClick={() => handleJog("reverse")}>
               ◀ Reverse
             </Button>
 
-            <Button disabled={!canJog} onClick={() => handleJog("forward")}>
+            <Button disabled={!canForward} onClick={() => handleJog("forward")}>
               Forward ▶
             </Button>
 
@@ -521,7 +611,14 @@ export default function CalibrationPage() {
           </div>
           <div className="flex flex-wrap gap-3">
             <Button
-              disabled={!active || busy || homingActive || brushSpeedPercent <= 0}
+              disabled={
+                !active ||
+                busy ||
+                homingActive ||
+                brushSpeedPercent <= 0 ||
+                !!session?.saved ||
+                ["water_start", "ready_to_unwind"].includes(stage ?? "")
+              }
               onClick={() =>
                 execute(() =>
                   startBrush.mutateAsync(brushPercentToHz(brushSpeedPercent)),
@@ -533,7 +630,12 @@ export default function CalibrationPage() {
 
             <Button
               variant="outline"
-              disabled={!active || busy || !session?.brush_running}
+              disabled={
+                !active ||
+                busy ||
+                !session?.brush_running ||
+                ["water_start", "ready_to_unwind"].includes(stage ?? "")
+              }
               onClick={() => execute(() => stopBrush.mutateAsync())}
             >
               Остановить щётки
@@ -593,6 +695,26 @@ export default function CalibrationPage() {
         </CardHeader>
 
         <CardContent className="flex flex-wrap gap-3">
+          {session?.saved && stage !== "rewind_complete" && (
+            <Button
+              disabled={busy || !!session?.running || !!session?.auto_mode}
+              onClick={() => execute(() => autoWind.mutateAsync())}
+            >
+              Автонамотка до Material End (макс. скорость)
+            </Button>
+          )}
+          {session?.auto_mode === "paused" && (
+            <Button
+              disabled={busy}
+              onClick={() =>
+                execute(() =>
+                  resume.mutateAsync(brushPercentToHz(brushSpeedPercent)),
+                )
+              }
+            >
+              Продолжить автоматическое движение
+            </Button>
+          )}
           <Button disabled={!canComplete} onClick={handleComplete}>
             Сохранить калибровку
           </Button>
@@ -606,6 +728,62 @@ export default function CalibrationPage() {
           </Button>
         </CardContent>
       </Card>
+
+      {active && session?.saved && stage === "rewind_complete" && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Геометрия материала</CardTitle>
+          </CardHeader>
+
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Автонамотка завершена. Измерь наружный диаметр рулона и введи его
+              в миллиметрах.
+            </p>
+
+            <label className="block space-y-2">
+              <span className="text-sm font-medium">
+                Наружный диаметр рулона, мм
+              </span>
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={finalDiameter}
+                onChange={(event) => setFinalDiameter(event.target.value)}
+                placeholder="Например, 260"
+                className="w-full rounded-md border bg-background px-3 py-2"
+              />
+            </label>
+
+            <Button
+              className="w-full"
+              disabled={
+                busy ||
+                !!session?.running ||
+                !!session?.brush_running ||
+                session?.auto_mode != null ||
+                !finalDiameter.trim() ||
+                !Number.isFinite(Number(finalDiameter)) ||
+                Number(finalDiameter) <= 0
+              }
+              onClick={() =>
+                execute(async () => {
+                  const result = await saveGeometry.mutateAsync(
+                    Number(finalDiameter),
+                  );
+
+                  setMessage(
+                    `Геометрия сохранена. Толщина материала: ${result.material_thickness_mm.toFixed(4)} мм`,
+                  );
+                })
+              }
+            >
+              Рассчитать толщину и сохранить
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {error && (
         <div

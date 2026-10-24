@@ -8,6 +8,7 @@ class RollerReferenceState:
     triggered: bool
     pulses: int
     sequence: int
+    generation: int = 0
 
 
 class RollerReferenceSensor(Protocol):

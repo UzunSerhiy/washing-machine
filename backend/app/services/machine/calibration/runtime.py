@@ -1,6 +1,9 @@
 import asyncio
+import logging
 from contextlib import suppress
 from typing import Protocol
+
+logger = logging.getLogger(__name__)
 
 
 class CalibrationService(Protocol):
@@ -18,7 +21,6 @@ class CalibrationRuntime:
 
         self.calibration_service = calibration_service
         self.interval_seconds = interval_seconds
-
         self._task: asyncio.Task | None = None
 
     @property
@@ -46,4 +48,7 @@ class CalibrationRuntime:
         while True:
             await asyncio.sleep(self.interval_seconds)
 
-            self.calibration_service.tick()
+            try:
+                self.calibration_service.tick()
+            except Exception:
+                logger.exception("Calibration runtime tick failed")

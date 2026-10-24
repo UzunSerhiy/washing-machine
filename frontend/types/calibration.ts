@@ -5,9 +5,14 @@ export interface CalibrationSession {
     | "set_zero"
     | "material_start"
     | "material_end"
+    | "water_start"
+    | "washing_stop"
     | "ready_to_unwind"
+    | "rewind_complete"
     | null;
 
+  saved: boolean;
+  auto_mode: "unwinding" | "winding" | "paused" | null;
   position_turns: number;
   running: boolean;
   paused: boolean;
@@ -20,12 +25,14 @@ export interface CalibrationSession {
   washing_stop_turns: number | null;
   material_start_turns: number | null;
   material_end_turns: number | null;
+  water_start_turns: number | null;
 }
 
 export type CalibrationPoint =
   | "washing_stop"
   | "material_start"
-  | "material_end";
+  | "material_end"
+  | "water_start";
 
 export type CalibrationJogDirection = "forward" | "reverse";
 

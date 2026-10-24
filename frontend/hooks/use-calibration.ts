@@ -4,6 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   getCalibrationSession,
+  autoWindCalibration,
+  resumeCalibration,
+  nextCalibrationStep,
   startCalibration,
   jogCalibration,
   calibrationAction,
@@ -15,6 +18,7 @@ import {
   getCalibrationHome,
   startCalibrationHome,
   getRollerReference,
+  saveCalibrationGeometry,
 } from "@/lib/calibration-api";
 
 import type {
@@ -34,12 +38,12 @@ export function useCalibrationSession(enabled = true) {
   });
 }
 
-function useCalibrationMutation<T>(
-  mutationFn: (variables: T) => Promise<unknown>,
+function useCalibrationMutation<TVariables, TData>(
+  mutationFn: (variables: TVariables) => Promise<TData>,
 ) {
   const queryClient = useQueryClient();
 
-  return useMutation({
+  return useMutation<TData, Error, TVariables>({
     mutationFn,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: KEY });
@@ -54,8 +58,16 @@ export function useStartCalibration() {
 
 export function useJogCalibration() {
   return useCalibrationMutation(
-    (params: { direction: CalibrationJogDirection; frequencyHz: number }) =>
-      jogCalibration(params.direction, params.frequencyHz),
+    (params: {
+      direction: CalibrationJogDirection;
+      frequencyHz: number;
+      brushFrequencyHz?: number;
+    }) =>
+      jogCalibration(
+        params.direction,
+        params.frequencyHz,
+        params.brushFrequencyHz,
+      ),
   );
 }
 
@@ -64,9 +76,14 @@ export function useCalibrationAction() {
 }
 
 export function useMarkCalibrationPoint() {
-  return useCalibrationMutation((point: CalibrationPoint) =>
-    markCalibrationPoint(point),
+  return useCalibrationMutation(
+    (params: { point: CalibrationPoint; brushFrequencyHz?: number }) =>
+      markCalibrationPoint(params.point, params.brushFrequencyHz),
   );
+}
+
+export function useNextCalibrationStep() {
+  return useCalibrationMutation(nextCalibrationStep);
 }
 
 export function useCompleteCalibration() {
@@ -84,7 +101,6 @@ export function useStartCalibrationBrush() {
 export function useStopCalibrationBrush() {
   return useCalibrationMutation(stopCalibrationBrush);
 }
-
 
 export function useCalibrationHome() {
   return useQuery({
@@ -114,4 +130,15 @@ export function useStartCalibrationHome() {
       await queryClient.invalidateQueries({ queryKey: KEY });
     },
   });
+}
+
+export function useSaveCalibrationGeometry() {
+  return useCalibrationMutation(saveCalibrationGeometry);
+}
+
+export function useAutoWindCalibration() {
+  return useCalibrationMutation(autoWindCalibration);
+}
+export function useResumeCalibration() {
+  return useCalibrationMutation(resumeCalibration);
 }

@@ -43,6 +43,28 @@ class CalibrationSession:
 
         turns = self.position_turns
 
+        if self.stage == CalibrationStage.WATER_START:
+            if not self.player.paused:
+                raise RuntimeError("Pause the roller before marking Water Start")
+            if point != CalibrationPoint.WATER_START:
+                raise ValueError("Expected water_start point")
+            start = self.machine_calibration.material_start_turns
+            end = self.winding_calibration.material_end_turns
+            if start is None or end is None or not start < turns < end:
+                raise ValueError("Water start must be between material start and end")
+            self.machine_calibration.set_water_start(turns)
+            self.stage = CalibrationStage.READY_TO_UNWIND
+            return
+
+        if self.stage == CalibrationStage.WASHING_STOP:
+            if point != CalibrationPoint.WASHING_STOP:
+                raise ValueError("Expected washing_stop point")
+            start = self.machine_calibration.material_start_turns
+            if start is None or not 0 < turns < start:
+                raise ValueError("Washing stop must be between zero and material start")
+            self.machine_calibration.set_washing_stop(turns)
+            return
+
         if self.stage == CalibrationStage.MATERIAL_START:
             if point != CalibrationPoint.MATERIAL_START:
                 raise ValueError("Expected material_start point")
@@ -64,7 +86,7 @@ class CalibrationSession:
                 raise ValueError("Material end must be after material start")
 
             self.winding_calibration.set_material_end(turns)
-            self.stage = CalibrationStage.READY_TO_UNWIND
+            self.stage = CalibrationStage.WATER_START
             return
 
         raise RuntimeError(f"Cannot mark calibration point at stage {self.stage.value}")
@@ -85,6 +107,13 @@ class CalibrationSession:
 
         if washing_stop is None or material_start is None or material_end is None:
             raise ValueError("Calibration is incomplete")
+
+        water_start = self.machine_calibration.water_start_turns
+        if water_start is None or not material_start < water_start < material_end:
+            raise ValueError("Water start must be between material start and end")
+
+        if self.stage != CalibrationStage.WASHING_STOP:
+            raise ValueError("Calibration has not reached washing stop")
 
         if material_end <= material_start:
             raise ValueError("Material end point must be after material start point")

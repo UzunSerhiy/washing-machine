@@ -92,15 +92,16 @@ class CalibrationPlayer:
         self._frequency_hz = frequency_hz
 
     def stop(self) -> None:
-        self.machine.stop_all()
+        try:
+            self.machine.stop_all()
+        finally:
+            self._running = False
+            self._paused = False
+            self._direction = None
+            self._frequency_hz = None
 
-        self._running = False
-        self._paused = False
-        self._direction = None
-        self._frequency_hz = None
-
-        self._brush_running = False
-        self._brush_frequency_hz = None
+            self._brush_running = False
+            self._brush_frequency_hz = None
 
     def pause(self) -> None:
         if not self._running:

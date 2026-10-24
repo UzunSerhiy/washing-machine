@@ -27,10 +27,11 @@ export async function startCalibration(materialProfileId: number) {
 export async function jogCalibration(
   direction: CalibrationJogDirection,
   frequencyHz: number,
+  brushFrequencyHz?: number,
 ) {
   const response = await api.post<CalibrationSession>(
     `${BASE}/jog/${direction}`,
-    { frequency_hz: frequencyHz },
+    { frequency_hz: frequencyHz, brush_frequency_hz: brushFrequencyHz },
   );
 
   return response.data;
@@ -44,11 +45,26 @@ export async function calibrationAction(
   return response.data;
 }
 
-export async function markCalibrationPoint(point: CalibrationPoint) {
+export async function markCalibrationPoint(
+  point: CalibrationPoint,
+  brushFrequencyHz?: number,
+) {
   const response = await api.post<CalibrationSession>(`${BASE}/mark`, {
     point,
+    brush_frequency_hz: brushFrequencyHz,
   });
 
+  return response.data;
+}
+
+export async function nextCalibrationStep(params: {
+  rollerFrequencyHz: number;
+  brushFrequencyHz: number;
+}) {
+  const response = await api.post<CalibrationSession>(`${BASE}/next`, {
+    roller_frequency_hz: params.rollerFrequencyHz,
+    brush_frequency_hz: params.brushFrequencyHz,
+  });
   return response.data;
 }
 
@@ -80,7 +96,6 @@ export async function stopCalibrationBrush() {
   return response.data;
 }
 
-
 export async function getCalibrationHome() {
   const response = await api.get<CalibrationHomeStatus>(`${BASE}/home`);
   return response.data;
@@ -88,7 +103,7 @@ export async function getCalibrationHome() {
 
 export async function startCalibrationHome() {
   const response = await api.post(`${BASE}/home`, {
-    frequency_hz: 2,
+    frequency_hz: 10,
     position_confirmed: true,
   });
   return response.data;
@@ -98,5 +113,30 @@ export async function getRollerReference() {
   const response = await api.get<RollerReferenceState>(
     "/api/machine/sensors/roller-reference",
   );
+  return response.data;
+}
+
+export async function autoWindCalibration() {
+  const response = await api.post<CalibrationSession>(`${BASE}/auto-wind`);
+  return response.data;
+}
+export async function resumeCalibration(brushFrequencyHz: number) {
+  const response = await api.post<CalibrationSession>(`${BASE}/resume`, {
+    roller_frequency_hz: 10,
+    brush_frequency_hz: brushFrequencyHz,
+  });
+  return response.data;
+}
+
+export async function saveCalibrationGeometry(finalDiameterMm: number) {
+  const response = await api.post<{
+    status: string;
+    material_profile_id: number;
+    final_diameter_mm: number;
+    material_thickness_mm: number;
+  }>(`${BASE}/geometry`, {
+    final_diameter_mm: finalDiameterMm,
+  });
+
   return response.data;
 }

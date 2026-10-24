@@ -63,6 +63,10 @@ class AutoSessionService:
         self.drive_diagnostics_service = drive_diagnostics_service
         self._prepared: PreparedAutoStage | None = None
         self._faulted = False
+        self.roller_homing_service = None
+
+    def set_roller_homing_service(self, service) -> None:
+        self.roller_homing_service = service
 
     async def prepare(
         self,
@@ -114,11 +118,28 @@ class AutoSessionService:
         )
 
         machine_calibration = MachineCalibration()
+
         machine_calibration.set_washing_stop(calibration.washing_stop_turns)
+
         machine_calibration.set_material_start(calibration.material_start_turns)
 
+        if calibration.water_start_turns is None:
+            raise RuntimeError("Water Start is not calibrated")
+
+        machine_calibration.set_water_start(calibration.water_start_turns)
+
+        machine_calibration.validate()
+
         winding_calibration = WindingCalibration()
+
         winding_calibration.set_material_end(calibration.material_end_turns)
+
+        winding_calibration.validate()
+
+        if self.roller_homing_service is None:
+            raise RuntimeError("Roller homing service is not configured")
+
+        self.roller_homing_service.require_zero()
 
         position_tracker = RollerPositionTracker()
 
@@ -165,16 +186,21 @@ class AutoSessionService:
 
         state = self.operation_service.state
 
-        prepared = self._prepared
-
         if state.running:
             raise RuntimeError("AUTO session is already running")
 
         if state.paused:
             raise RuntimeError("AUTO session is paused; use resume()")
 
+        prepared = self._prepared
+
         if prepared.controller.completed:
             raise RuntimeError("AUTO session is already completed")
+
+        if self.roller_homing_service is None:
+            raise RuntimeError("Roller homing service is not configured")
+
+        self.roller_homing_service.require_zero()
 
         belt_frequency_hz = self.speed_layer.belt_frequency(prepared.mode_speed_percent)
 

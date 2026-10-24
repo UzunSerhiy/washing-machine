@@ -9,6 +9,7 @@ class CalibrationData:
     washing_stop_turns: float
     material_start_turns: float
     material_end_turns: float
+    water_start_turns: float | None = None
 
     def __post_init__(self) -> None:
         if not (
@@ -18,6 +19,11 @@ class CalibrationData:
             < self.material_end_turns
         ):
             raise ValueError("Calibration points must be ordered")
+
+        if self.water_start_turns is not None and not (
+            self.material_start_turns < self.water_start_turns < self.material_end_turns
+        ):
+            raise ValueError("Water start must be between material start and material end")
 
     @property
     def material_length_turns(self) -> float:
