@@ -116,11 +116,11 @@ class MachineOperationService:
 
     def start_manual_roller_forward(self) -> None:
         self._require_manual_mode()
+        frequency_hz = self.get_manual_roller_frequency()
 
+        # Once a motion command is attempted, position may be unknown.
         if self.roller_homing_service is not None:
             self.roller_homing_service.invalidate()
-
-        frequency_hz = self.get_manual_roller_frequency()
 
         self.machine.start_roller_forward(frequency_hz)
 
@@ -128,11 +128,11 @@ class MachineOperationService:
 
     def start_manual_roller_reverse(self) -> None:
         self._require_manual_mode()
+        frequency_hz = self.get_manual_roller_frequency()
 
+        # Once a motion command is attempted, position may be unknown.
         if self.roller_homing_service is not None:
             self.roller_homing_service.invalidate()
-
-        frequency_hz = self.get_manual_roller_frequency()
 
         self.machine.start_roller_reverse(frequency_hz)
 

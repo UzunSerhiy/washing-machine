@@ -321,3 +321,83 @@ def test_manual_speeds_are_not_configured_initially() -> None:
 
     assert service.state.roller_speed_percent is None
     assert service.state.brush_speed_percent is None
+
+
+class FakeHoming:
+    def __init__(self):
+        self.homed = True
+        self.searching = False
+        self.invalidations = 0
+
+    def invalidate(self):
+        self.invalidations += 1
+        self.homed = False
+
+
+@pytest.mark.parametrize("direction", ["forward", "reverse"])
+def test_manual_motion_without_speed_keeps_confirmed_home(direction):
+    machine = FakeMachine()
+    service = MachineOperationService(machine=machine)
+    home = FakeHoming()
+    service.set_roller_homing_service(home)
+
+    with pytest.raises(RuntimeError, match="speed is not configured"):
+        getattr(service, f"start_manual_roller_{direction}")()
+
+    assert home.homed is True
+    assert home.invalidations == 0
+    assert machine.calls == []
+
+
+@pytest.mark.parametrize("direction", ["forward", "reverse"])
+def test_manual_motion_invalidates_confirmed_home(direction):
+    machine = FakeMachine()
+    service = MachineOperationService(machine=machine)
+    home = FakeHoming()
+    service.set_roller_homing_service(home)
+    service.set_manual_roller_speed(60)
+
+    getattr(service, f"start_manual_roller_{direction}")()
+
+    assert home.homed is False
+    assert home.invalidations == 1
+    assert machine.calls == [(direction, 30.0)]
+
+
+@pytest.mark.parametrize("mode", ["manual", "auto", "calibration"])
+def test_mode_switch_without_motion_preserves_home(mode):
+    machine = FakeMachine()
+    service = MachineOperationService(machine=machine)
+    home = FakeHoming()
+    service.set_roller_homing_service(home)
+
+    if mode == "manual":
+        service.set_manual_mode()
+    elif mode == "auto":
+        service.set_auto_mode(material_profile_id=1)
+    else:
+        service.set_calibration_mode(material_profile_id=1)
+
+    assert home.homed is True
+    assert home.invalidations == 0
+    assert machine.calls == [("stop_all",)]
+
+
+@pytest.mark.parametrize("mode", ["manual", "auto", "calibration"])
+def test_mode_switch_rejected_during_homing(mode):
+    machine = FakeMachine()
+    service = MachineOperationService(machine=machine)
+    home = FakeHoming()
+    home.searching = True
+    service.set_roller_homing_service(home)
+
+    with pytest.raises(RuntimeError, match="homing is active"):
+        if mode == "manual":
+            service.set_manual_mode()
+        elif mode == "auto":
+            service.set_auto_mode(material_profile_id=1)
+        else:
+            service.set_calibration_mode(material_profile_id=1)
+
+    assert machine.calls == []
+    assert home.invalidations == 0
