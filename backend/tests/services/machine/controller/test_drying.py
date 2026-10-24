@@ -29,6 +29,7 @@ class FakeMachine:
 def create_controller() -> DryingController:
     machine_calibration = MachineCalibration()
     machine_calibration.set_material_start(100.0)
+    machine_calibration.set_water_start(150.0)
     machine_calibration.set_washing_stop(15.0)
 
     winding_calibration = WindingCalibration()

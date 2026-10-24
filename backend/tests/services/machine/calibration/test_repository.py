@@ -6,6 +6,7 @@ from app.models.winding_calibration import (
 from app.services.machine.calibration.repository import CalibrationRepository
 from app.services.machine.calibration.session import CalibrationSession
 from app.services.machine.calibration.points import CalibrationPoint
+from app.services.machine.calibration.stage import CalibrationStage
 from app.services.winding.rotation import RollerRotationCalculator
 from app.services.machine.calibration.data import CalibrationData
 from app.models.winding_parameters import WindingParameters
@@ -35,6 +36,12 @@ class FakeSession:
         self.results = list(results or [])
         self.added = []
 
+    async def get(self, model, key):
+        return type("Machine", (), {"roller_core_diameter_mm": 200.0})()
+
+    async def flush(self):
+        pass
+
     async def execute(self, statement):
         if not self.results:
             raise AssertionError("Unexpected database query")
@@ -57,14 +64,17 @@ def create_calibration_session(
         material_profile_id=material_profile_id,
     )
 
-    session.position_tracker.set_position(3.0)
-    session.set_point(CalibrationPoint.WASHING_STOP)
-
+    session.confirm_zero()
     session.position_tracker.set_position(10.0)
     session.set_point(CalibrationPoint.MATERIAL_START)
-
     session.position_tracker.set_position(35.0)
     session.set_point(CalibrationPoint.MATERIAL_END)
+    session.player._paused = True
+    session.position_tracker.set_position(25.0)
+    session.set_point(CalibrationPoint.WATER_START)
+    session.position_tracker.set_position(3.0)
+    session.stage = CalibrationStage.WASHING_STOP
+    session.set_point(CalibrationPoint.WASHING_STOP)
 
     return session
 
@@ -327,77 +337,35 @@ async def test_load_requires_material_calibration() -> None:
 
 
 @pytest.mark.anyio
-async def test_save_updates_winding_parameters_from_calibration() -> None:
-    machine_model = MachineCalibrationSettings(
-        machine_id=1,
-        washing_stop_turns=3.0,
-        material_start_turns=10.0,
+async def test_save_geometry_updates_winding_parameters() -> None:
+    machine_calibration = MachineCalibrationSettings(
+        machine_id=1, washing_stop_turns=3.0, material_start_turns=10.0,
     )
-
-    winding_model = WindingCalibrationModel(
-        material_profile_id=1,
-        material_end_turns=35.0,
+    winding_calibration = WindingCalibrationModel(
+        material_profile_id=1, material_end_turns=35.0,
     )
-
-    parameters = WindingParameters(
-        material_profile_id=1,
-        core_diameter_mm=200.0,
+    parameters = WindingParameters(material_profile_id=1, core_diameter_mm=200.0)
+    db = FakeSession(results=[machine_calibration, winding_calibration, parameters])
+    thickness = await CalibrationRepository().save_geometry(
+        db=db, machine_id=1, material_profile_id=1, final_diameter_mm=225.0,
     )
-
-    db = FakeSession(
-        results=[
-            machine_model,
-            winding_model,
-            parameters,
-        ]
-    )
-
-    repository = CalibrationRepository()
-    calibration_session = create_calibration_session()
-
-    await repository.save(
-        db=db,
-        machine_id=1,
-        calibration_session=calibration_session,
-        final_diameter_mm=225.0,
-    )
-
     assert parameters.calibration_turns == pytest.approx(25.0)
     assert parameters.calibration_final_diameter_mm == pytest.approx(225.0)
-    assert parameters.material_thickness_mm == pytest.approx(0.5)
+    assert parameters.material_thickness_mm == pytest.approx(thickness)
 
 
 @pytest.mark.anyio
-async def test_save_requires_winding_parameters() -> None:
-    machine_model = MachineCalibrationSettings(
-        machine_id=1,
-        washing_stop_turns=3.0,
-        material_start_turns=10.0,
+async def test_save_geometry_creates_missing_winding_parameters() -> None:
+    machine_calibration = MachineCalibrationSettings(
+        machine_id=1, washing_stop_turns=3.0, material_start_turns=10.0,
     )
-
-    winding_model = WindingCalibrationModel(
-        material_profile_id=1,
-        material_end_turns=35.0,
+    winding_calibration = WindingCalibrationModel(
+        material_profile_id=1, material_end_turns=35.0,
     )
-
-    db = FakeSession(
-        results=[
-            machine_model,
-            winding_model,
-            None,
-        ]
+    db = FakeSession(results=[machine_calibration, winding_calibration, None])
+    thickness = await CalibrationRepository().save_geometry(
+        db=db, machine_id=1, material_profile_id=1, final_diameter_mm=225.0,
     )
-
-    repository = CalibrationRepository()
-    calibration_session = create_calibration_session()
-
-    with pytest.raises(
-        RuntimeError,
-        match="Winding parameters not found",
-    ):
-        await repository.save(
-            db=db,
-            machine_id=1,
-            calibration_session=calibration_session,
-            final_diameter_mm=225.0,
-        )
+    assert len(db.added) == 1
+    assert isinstance(db.added[0], WindingParameters)
+    assert db.added[0].material_thickness_mm == pytest.approx(thickness)

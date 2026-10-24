@@ -11,6 +11,7 @@ from app.services.machine.trajectory.washing import (
 def create_trajectory() -> WashingTrajectory:
     machine_calibration = MachineCalibration()
     machine_calibration.set_material_start(20.0)
+    machine_calibration.set_water_start(30.0)
     machine_calibration.set_washing_stop(5.0)
 
     winding_calibration = WindingCalibration()
@@ -79,6 +80,7 @@ def test_washing_trajectory_requires_machine_calibration():
 def test_washing_trajectory_requires_washing_stop_calibration():
     machine_calibration = MachineCalibration()
     machine_calibration.set_material_start(20.0)
+    machine_calibration.set_water_start(30.0)
 
     winding_calibration = WindingCalibration()
     winding_calibration.set_material_end(50.0)
@@ -98,6 +100,7 @@ def test_washing_trajectory_requires_washing_stop_calibration():
 def test_washing_trajectory_requires_winding_calibration():
     machine_calibration = MachineCalibration()
     machine_calibration.set_material_start(20.0)
+    machine_calibration.set_water_start(30.0)
     machine_calibration.set_washing_stop(5.0)
 
     winding_calibration = WindingCalibration()

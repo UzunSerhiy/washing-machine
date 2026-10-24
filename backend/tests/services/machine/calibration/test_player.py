@@ -21,6 +21,9 @@ class FakeMachine:
     def stop_roller(self) -> None:
         self.calls.append(("stop",))
 
+    def stop_all(self) -> None:
+        self.calls.append(("stop",))
+
 
 @pytest.fixture
 def machine():

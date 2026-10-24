@@ -1,3 +1,4 @@
+from unittest.mock import Mock
 import pytest
 import asyncio
 
@@ -44,6 +45,7 @@ class FakeCalibrationRepository:
             material_profile_id=material_profile_id,
             washing_stop_turns=15.0,
             material_start_turns=100.0,
+            water_start_turns=140.0,
             material_end_turns=180,
         )
 
@@ -131,6 +133,7 @@ async def test_prepare_winding_loads_saved_stage_speed():
         winding_parameters_repository=winding_parameters_repository,
         machine_repository=machine_repository,
     )
+    service.set_roller_homing_service(Mock())
 
     fake_session = object()
 
@@ -220,6 +223,7 @@ async def test_prepare_requires_auto_mode():
         operation_service=operation_service,
         speed_settings_service=FakeSpeedSettingsService(),
     )
+    service.set_roller_homing_service(Mock())
 
     with pytest.raises(RuntimeError, match="Machine is not in auto mode"):
         await service.prepare(object())
@@ -235,6 +239,7 @@ async def test_prepare_requires_auto_stage():
         operation_service=operation_service,
         speed_settings_service=FakeSpeedSettingsService(),
     )
+    service.set_roller_homing_service(Mock())
 
     with pytest.raises(RuntimeError, match="Auto stage is not selected"):
         await service.prepare(object())
@@ -250,6 +255,7 @@ async def test_prepare_requires_material_profile():
         operation_service=operation_service,
         speed_settings_service=FakeSpeedSettingsService(),
     )
+    service.set_roller_homing_service(Mock())
 
     with pytest.raises(RuntimeError, match="Material profile is not selected"):
         await service.prepare(object())
@@ -267,6 +273,7 @@ async def test_prepare_does_not_start_winding():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     prepared = await service.prepare(object())
 
@@ -290,6 +297,7 @@ async def test_start_winding_starts_roller_forward():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     await service.prepare(object())
 
@@ -307,10 +315,11 @@ def test_start_requires_prepared_stage():
         operation_service=FakeOperationService(),
         speed_settings_service=FakeSpeedSettingsService(),
     )
+    service.set_roller_homing_service(Mock())
 
     with pytest.raises(
         RuntimeError,
-        match="Auto stage is not prepared",
+        match="AUTO session is not prepared|Auto stage is not prepared",
     ):
         service.start()
 
@@ -327,6 +336,7 @@ async def test_tick_updates_winding_position():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     prepared = await service.prepare(object())
 
@@ -355,6 +365,7 @@ async def test_winding_completes_at_material_end():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     prepared = await service.prepare(object())
 
@@ -393,6 +404,7 @@ async def test_pause_winding_stops_roller_and_preserves_position():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     prepared = await service.prepare(object())
 
@@ -425,6 +437,7 @@ async def test_resume_winding_continues_from_paused_position():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     prepared = await service.prepare(object())
 
@@ -460,6 +473,7 @@ async def test_resume_requires_paused_state():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     await service.prepare(object())
 
@@ -484,6 +498,7 @@ async def test_stop_winding_ends_auto_session():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     prepared = await service.prepare(object())
 
@@ -504,7 +519,7 @@ async def test_stop_winding_ends_auto_session():
 
     with pytest.raises(
         RuntimeError,
-        match="Auto stage is not prepared",
+        match="AUTO session is not prepared|Auto stage is not prepared",
     ):
         service.resume()
 
@@ -528,6 +543,7 @@ async def test_runtime_drives_winding_session():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     prepared = await service.prepare(object())
     service.start()
@@ -560,6 +576,7 @@ async def test_tick_failure_clears_running_state():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     await service.prepare(object())
     service.start()
@@ -591,6 +608,7 @@ async def test_start_failure_keeps_machine_stopped():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     await service.prepare(object())
 
@@ -621,6 +639,7 @@ async def test_tick_update_failure_clears_running_state():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     prepared = await service.prepare(object())
     service.start()
@@ -656,6 +675,7 @@ async def test_cannot_restart_after_tick_failure():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     prepared = await service.prepare(object())
     service.start()
@@ -693,6 +713,7 @@ async def test_cannot_resume_after_fault():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     prepared = await service.prepare(object())
     service.start()
@@ -739,6 +760,7 @@ async def test_start_failure_enters_fault_state():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     await service.prepare(object())
 
@@ -773,6 +795,7 @@ async def test_resume_failure_enters_fault_state():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     await service.prepare(object())
     service.start()
@@ -811,6 +834,7 @@ async def test_stop_does_not_clear_fault():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     prepared = await service.prepare(object())
     service.start()
@@ -851,6 +875,7 @@ async def test_stop_failure_enters_fault_state():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     await service.prepare(object())
     service.start()
@@ -886,6 +911,7 @@ async def test_pause_failure_enters_fault_state():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     await service.prepare(object())
     service.start()
@@ -924,6 +950,7 @@ async def test_cannot_reset_fault_with_prepared_session():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     await service.prepare(object())
 
@@ -946,6 +973,7 @@ def test_cannot_reset_fault_while_running():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     service._faulted = True
     operation_service.state.running = True
@@ -967,6 +995,7 @@ def test_cannot_reset_fault_without_safety_confirmation():
         winding_parameters_repository=FakeWindingParametersRepository(),
         machine_repository=FakeMachineRepository(),
     )
+    service.set_roller_homing_service(Mock())
 
     service._faulted = True
 
@@ -993,6 +1022,7 @@ def test_auto_session_accepts_safety_service():
         machine_repository=FakeMachineRepository(),
         safety_service=safety_service,
     )
+    service.set_roller_homing_service(Mock())
 
     assert service.safety_service is safety_service
 
@@ -1019,6 +1049,7 @@ def test_reset_fault_calls_safety_service():
         machine_repository=FakeMachineRepository(),
         safety_service=safety_service,
     )
+    service.set_roller_homing_service(Mock())
 
     service._faulted = True
 
@@ -1062,6 +1093,7 @@ def test_reset_fault_requires_additional_recovery_checks():
         safety_service=safety_service,
         drive_diagnostics_service=diagnostics_service,
     )
+    service.set_roller_homing_service(Mock())
 
     service._faulted = True
 
@@ -1118,6 +1150,7 @@ def test_reset_fault_requires_drive_diagnostics(
         safety_service=FakeSafetyService(),
         drive_diagnostics_service=diagnostics_service,
     )
+    service.set_roller_homing_service(Mock())
 
     service._faulted = True
 
@@ -1192,6 +1225,7 @@ def test_reset_fault_validation_order(
         safety_service=FakeSafetyService(),
         drive_diagnostics_service=FakeDriveDiagnosticsService(),
     )
+    service.set_roller_homing_service(Mock())
 
     service._faulted = True
 

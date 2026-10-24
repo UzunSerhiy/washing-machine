@@ -1,6 +1,8 @@
+from unittest.mock import Mock
 import pytest
 
 from app.services.machine.calibration.points import CalibrationPoint
+from app.services.machine.calibration.stage import CalibrationStage
 
 from app.services.machine.calibration.session_service import (
     CalibrationSessionService,
@@ -35,6 +37,9 @@ class FakeMachine:
     def stop_roller(self) -> None:
         self.calls.append(("stop",))
 
+    def stop_all(self) -> None:
+        self.calls.append(("stop",))
+
 
 def create_service():
     machine = FakeMachine()
@@ -46,6 +51,7 @@ def create_service():
             gear_ratio=100,
         ),
     )
+    service.set_roller_homing_service(Mock(searching=False))
 
     return service, machine
 
@@ -62,6 +68,7 @@ def create_service_with_clock():
         ),
         clock=clock,
     )
+    service.set_roller_homing_service(Mock(searching=False))
 
     return service, machine, clock
 
@@ -202,23 +209,17 @@ def test_stop_delegates_to_player() -> None:
 def test_reset_position_sets_point_zero() -> None:
     service, _ = create_service()
     session = service.start(material_profile_id=1)
-
-    session.position_tracker.set_position(12.5)
-
-    service.reset_position()
-
-    assert session.position_turns == 0.0
+    assert session.stage == CalibrationStage.MATERIAL_START
+    with pytest.raises(RuntimeError, match="already confirmed"):
+        service.reset_position()
 
 
 def test_mark_washing_stop_uses_current_position() -> None:
     service, _ = create_service()
     session = service.start(material_profile_id=1)
-
     session.position_tracker.set_position(3.0)
-
-    service.mark(CalibrationPoint.WASHING_STOP)
-
-    assert session.machine_calibration.washing_stop_turns == 3.0
+    with pytest.raises(ValueError, match="Expected material_start"):
+        service.mark(CalibrationPoint.WASHING_STOP)
 
 
 def test_mark_material_start_uses_current_position() -> None:
@@ -235,11 +236,10 @@ def test_mark_material_start_uses_current_position() -> None:
 def test_mark_material_end_uses_current_position() -> None:
     service, _ = create_service()
     session = service.start(material_profile_id=1)
-
+    session.position_tracker.set_position(10.0)
+    service.mark(CalibrationPoint.MATERIAL_START)
     session.position_tracker.set_position(35.0)
-
     service.mark(CalibrationPoint.MATERIAL_END)
-
     assert session.winding_calibration.material_end_turns == 35.0
 
 
@@ -262,39 +262,23 @@ def test_commands_require_active_session() -> None:
 def test_forward_position_is_updated_before_mark() -> None:
     service, _, clock = create_service_with_clock()
     session = service.start(material_profile_id=1)
-
     service.jog_forward(20.0)
-
     clock.advance(10.0)
-
-    service.mark(CalibrationPoint.WASHING_STOP)
-
-    expected_turns = 3.62 * 10 / 60
-
-    assert session.position_turns == pytest.approx(expected_turns)
-    assert session.machine_calibration.washing_stop_turns == pytest.approx(
-        expected_turns
-    )
+    service.pause()
+    service.mark(CalibrationPoint.MATERIAL_START)
+    expected = 3.62 * 10 / 60
+    assert session.position_turns == pytest.approx(expected)
+    assert session.machine_calibration.material_start_turns == pytest.approx(expected)
 
 
 def test_reverse_position_is_updated_before_mark() -> None:
     service, _, clock = create_service_with_clock()
     session = service.start(material_profile_id=1)
-
     session.position_tracker.set_position(2.0)
-
     service.jog_reverse(20.0)
-
     clock.advance(10.0)
-
-    service.mark(CalibrationPoint.WASHING_STOP)
-
-    expected_turns = 2.0 - (3.62 * 10 / 60)
-
-    assert session.position_turns == pytest.approx(expected_turns)
-    assert session.machine_calibration.washing_stop_turns == pytest.approx(
-        expected_turns
-    )
+    service.pause()
+    assert session.position_turns == pytest.approx(2.0 - 3.62 * 10 / 60)
 
 
 def test_pause_updates_position() -> None:
@@ -330,79 +314,57 @@ def test_stop_updates_position() -> None:
 def test_changing_direction_preserves_previous_movement() -> None:
     service, _, clock = create_service_with_clock()
     session = service.start(material_profile_id=1)
-
     service.jog_forward(20.0)
-
     clock.advance(10.0)
-
-    service.jog_reverse(20.0)
-
+    with pytest.raises(RuntimeError, match="Pause roller before changing direction"):
+        service.jog_reverse(20.0)
+    service.pause()
     forward_turns = 3.62 * 10 / 60
-
     assert session.position_turns == pytest.approx(forward_turns)
-
+    service.jog_reverse(20.0)
     clock.advance(5.0)
-
     service.stop()
-
-    reverse_turns = 3.62 * 5 / 60
-
-    assert session.position_turns == pytest.approx(forward_turns - reverse_turns)
+    assert session.position_turns == pytest.approx(forward_turns - 3.62 * 5 / 60)
 
 
 def test_reset_position_syncs_before_setting_point_zero() -> None:
     service, _, clock = create_service_with_clock()
     session = service.start(material_profile_id=1)
-
     service.jog_forward(20.0)
-
     clock.advance(10.0)
-
-    service.reset_position()
-
-    assert session.position_turns == 0.0
+    with pytest.raises(RuntimeError, match="Stop roller and brushes"):
+        service.reset_position()
+    service.pause()
+    with pytest.raises(RuntimeError, match="already confirmed"):
+        service.reset_position()
+    assert session.position_turns > 0
 
 
 def test_complete_returns_completed_session() -> None:
     service, _ = create_service()
     session = service.start(material_profile_id=1)
-
-    session.position_tracker.set_position(3.0)
-    service.mark(CalibrationPoint.WASHING_STOP)
-
     session.position_tracker.set_position(10.0)
     service.mark(CalibrationPoint.MATERIAL_START)
-
     session.position_tracker.set_position(35.0)
     service.mark(CalibrationPoint.MATERIAL_END)
-
+    session.player._paused = True
+    session.position_tracker.set_position(25.0)
+    session.set_point(CalibrationPoint.WATER_START)
+    session.stage = CalibrationStage.WASHING_STOP
+    session.position_tracker.set_position(3.0)
+    service.mark(CalibrationPoint.WASHING_STOP)
     completed = service.complete()
-
     assert completed is session
     assert completed.is_complete()
-    assert service.active is False
 
 
 def test_complete_stops_player() -> None:
     service, machine = create_service()
     session = service.start(material_profile_id=1)
-
-    session.position_tracker.set_position(3.0)
-    service.mark(CalibrationPoint.WASHING_STOP)
-
-    session.position_tracker.set_position(10.0)
-    service.mark(CalibrationPoint.MATERIAL_START)
-
-    session.position_tracker.set_position(35.0)
-    service.mark(CalibrationPoint.MATERIAL_END)
-
     service.jog_forward(20.0)
-
-    machine.calls.clear()
-
-    service.complete()
-
-    assert machine.calls == [("stop",)]
+    with pytest.raises(RuntimeError, match="Stop roller and brushes"):
+        service.complete()
+    assert session.player.running
 
 
 def test_complete_requires_complete_calibration() -> None:

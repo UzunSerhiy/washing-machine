@@ -92,12 +92,14 @@ def test_start_failure_sets_fault():
     machine.stop_roller.assert_called()
 
 
-def test_require_zero_before_homing(homing_service):
+def test_require_zero_before_homing():
+    homing_service, _, _ = make_service()
     with pytest.raises(RuntimeError):
         homing_service.require_zero()
 
 
-def test_manual_movement_invalidates_zero(homing_service):
+def test_manual_movement_invalidates_zero():
+    homing_service, _, _ = make_service()
     homing_service._homed = True
 
     assert homing_service.homed is True

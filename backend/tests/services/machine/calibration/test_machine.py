@@ -35,6 +35,7 @@ def test_calibration_is_complete():
     calibration.set_material_start(10.0)
     calibration.set_washing_stop(3.0)
 
+    calibration.set_water_start(20.0)
     assert calibration.is_complete() is True
 
 
@@ -44,6 +45,7 @@ def test_validate_complete_calibration():
     calibration.set_material_start(10.0)
     calibration.set_washing_stop(3.0)
 
+    calibration.set_water_start(20.0)
     calibration.validate()
 
 

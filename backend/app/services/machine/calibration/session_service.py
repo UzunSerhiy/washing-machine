@@ -32,7 +32,7 @@ class CalibrationSessionService:
         self._saved = False
         self._water_reverse_started = False
         self._auto_paused = False
-        self.roller_homming_service = None
+        self.roller_homing_service = None
 
     @property
     def active(self) -> bool:
@@ -59,6 +59,8 @@ class CalibrationSessionService:
             rotation_calculator=self.rotation_calculator,
             material_profile_id=material_profile_id,
         )
+        # Shared HOME has already established the reference position.
+        self._session.confirm_zero()
 
         return self._session
 

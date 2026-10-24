@@ -644,16 +644,8 @@ def calibration_brush_stop():
 
 @router.get("/calibration/home")
 def get_calibration_home():
-    service = get_calibration_session_service()
-
-    if service.homing is None:
-        return {"available": False, "state": None, "error": None}
-
-    return {
-        "available": True,
-        "state": service.homing.state,
-        "error": service.homing.error,
-    }
+    # Compatibility endpoint: shared HOME is the only source of reference state.
+    return get_roller_homing_service().get_status()
 
 
 @router.post("/calibration/home")

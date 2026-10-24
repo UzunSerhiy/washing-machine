@@ -46,4 +46,4 @@ def test_all_points_are_unique():
 
 
 def test_number_of_calibration_points():
-    assert len(CalibrationPoint) == 4
+    assert len(CalibrationPoint) == 5

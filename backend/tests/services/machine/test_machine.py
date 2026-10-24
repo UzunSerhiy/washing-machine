@@ -69,5 +69,6 @@ def test_stop_all_stops_brush_and_roller():
 
     machine.stop_all()
 
-    brush.stop.assert_called_once()
-    roller.stop.assert_called_once()
+    brush.left_drive.stop.assert_called_once()
+    brush.right_drive.stop.assert_called_once()
+    roller.drive.stop.assert_called_once()

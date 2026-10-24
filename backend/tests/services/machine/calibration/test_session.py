@@ -1,6 +1,7 @@
 import pytest
 
 from app.services.machine.calibration.points import CalibrationPoint
+from app.services.machine.calibration.stage import CalibrationStage
 from app.services.machine.calibration.session import CalibrationSession
 from app.services.winding.rotation import RollerRotationCalculator
 
@@ -41,57 +42,63 @@ def test_session_uses_selected_material() -> None:
 
 def test_set_machine_calibration_points() -> None:
     session = create_session()
-
-    session.position_tracker.set_position(3.0)
-    session.set_point(CalibrationPoint.WASHING_STOP)
-
+    session.confirm_zero()
     session.position_tracker.set_position(10.0)
     session.set_point(CalibrationPoint.MATERIAL_START)
-
+    session.position_tracker.set_position(35.0)
+    session.set_point(CalibrationPoint.MATERIAL_END)
+    session.player._paused = True
+    session.position_tracker.set_position(25.0)
+    session.set_point(CalibrationPoint.WATER_START)
+    session.stage = CalibrationStage.WASHING_STOP
+    session.position_tracker.set_position(3.0)
+    session.set_point(CalibrationPoint.WASHING_STOP)
     assert session.machine_calibration.washing_stop_turns == 3.0
     assert session.machine_calibration.material_start_turns == 10.0
+    assert session.machine_calibration.water_start_turns == 25.0
 
 
 def test_set_material_end_point() -> None:
     session = create_session()
-
+    session.confirm_zero()
+    session.position_tracker.set_position(10.0)
+    session.set_point(CalibrationPoint.MATERIAL_START)
     session.position_tracker.set_position(35.0)
     session.set_point(CalibrationPoint.MATERIAL_END)
-
     assert session.winding_calibration.material_end_turns == 35.0
 
 
 def test_complete_calibration() -> None:
     session = create_session()
-
-    session.position_tracker.set_position(3.0)
-    session.set_point(CalibrationPoint.WASHING_STOP)
-
+    session.confirm_zero()
     session.position_tracker.set_position(10.0)
     session.set_point(CalibrationPoint.MATERIAL_START)
-
     session.position_tracker.set_position(35.0)
     session.set_point(CalibrationPoint.MATERIAL_END)
-
-    assert session.is_complete() is True
-
+    session.player._paused = True
+    session.position_tracker.set_position(25.0)
+    session.set_point(CalibrationPoint.WATER_START)
+    session.stage = CalibrationStage.WASHING_STOP
+    session.position_tracker.set_position(3.0)
+    session.set_point(CalibrationPoint.WASHING_STOP)
+    assert session.is_complete()
     session.validate()
 
 
 def test_incomplete_calibration_is_not_complete() -> None:
     session = create_session()
-
-    session.position_tracker.set_position(3.0)
-    session.set_point(CalibrationPoint.WASHING_STOP)
-
+    session.confirm_zero()
+    session.position_tracker.set_position(10.0)
+    session.set_point(CalibrationPoint.MATERIAL_START)
     assert session.is_complete() is False
 
 
 def test_point_zero_cannot_be_saved_as_calibration_point() -> None:
     session = create_session()
+    session.confirm_zero()
 
     with pytest.raises(
         ValueError,
-        match="Unsupported calibration point",
+        match="Expected material_start point",
     ):
         session.set_point(CalibrationPoint.POINT_0)

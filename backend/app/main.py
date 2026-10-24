@@ -132,6 +132,12 @@ async def lifespan(app: FastAPI):
         rotation_calculator=rotation_calculator,
     )
 
+    calibration_session_service = CalibrationSessionService(
+        machine=created_machine,
+        rotation_calculator=rotation_calculator,
+        sensor_service=roller_sensor_service,
+    )
+
     calibration_session_service.set_roller_homing_service(roller_homing_service)
 
     auto_session_service.set_roller_homing_service(roller_homing_service)
@@ -149,12 +155,6 @@ async def lifespan(app: FastAPI):
 
     await roller_homing_runtime.start()
 
-    calibration_session_service = CalibrationSessionService(
-        machine=created_machine,
-        rotation_calculator=rotation_calculator,
-        sensor_service=roller_sensor_service,
-    )
-
     calibration_runtime = CalibrationRuntime(
         calibration_service=calibration_session_service, interval_seconds=0.1
     )
@@ -171,18 +171,21 @@ async def lifespan(app: FastAPI):
     if roller_homing_runtime is not None:
         await roller_homing_runtime.stop()
 
+    if calibration_runtime is not None:
+        await calibration_runtime.stop()
+
+    if auto_runtime is not None:
+        await auto_runtime.stop()
+
+    if roller_homing_service is not None and roller_homing_service.searching:
+        roller_homing_service.cancel()
+
     drive_service.close()
 
     if settings.DRIVE_MODE == "fake":
         print("Fake drives stopped")
     else:
         print("RS485 disconnected")
-
-    if calibration_runtime is not None:
-        await calibration_runtime.stop()
-
-    if auto_runtime is not None:
-        await auto_runtime.stop()
 
     if isinstance(roller_reference_sensor, SerialRollerReferenceSensor):
         roller_reference_sensor.stop()
