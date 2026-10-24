@@ -61,3 +61,35 @@ def test_stage_requires_correct_start():
 def test_no_negative_elapsed():
     with pytest.raises(ValueError):
         controller(AutoStage.WINDING, 0).advance(-1)
+
+
+@pytest.mark.parametrize('stage,start,near,end', [
+    (AutoStage.WINDING, 0, 11.8, 12),
+    (AutoStage.WASHING, 12, 1.2, 1),
+    (AutoStage.DRYING, 1, 11.8, 12),
+    (AutoStage.UNWINDING, 12, 0.2, 0),
+])
+def test_observed_position_completes_stage(stage, start, near, end):
+    c = controller(stage, start)
+    c.observe_position(near)
+    assert not c.completed
+    c.observe_position(end)
+    assert c.completed
+    assert c.position_turns == end
+    with pytest.raises(RuntimeError, match="moved after"):
+        c.observe_position(near)
+
+
+def test_observed_position_controls_water():
+    c = controller(AutoStage.DRYING, 1)
+    assert c.water_on
+    c.observe_position(7)
+    assert not c.water_on
+    assert not c.completed
+
+
+def test_observed_position_rejects_invalid_values():
+    c = controller(AutoStage.WINDING, 0)
+    for value in (-0.1, 12.1, float('nan'), float('inf')):
+        with pytest.raises(ValueError):
+            c.observe_position(value)

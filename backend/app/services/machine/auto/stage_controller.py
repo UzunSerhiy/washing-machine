@@ -47,6 +47,30 @@ class AutoStageController:
     def water_on(self) -> bool:
         return not self.completed and water_required(self.stage, self.position_turns, self.geometry)
 
+    def observe_position(self, position_turns: float) -> None:
+        """Update stage progress from an external position estimator.
+
+        Unlike advance(), this does not integrate commanded frequency. The
+        observed position is not clamped to the stage target: any overshoot
+        remains visible to the caller for diagnostics and safety handling.
+        Completion means the target was crossed in the expected direction,
+        NOT that the physical roller has stopped.
+        """
+        from math import isfinite
+
+        if not isfinite(position_turns):
+            raise ValueError("Observed position must be finite")
+        if not 0 <= position_turns <= self.geometry.material_end:
+            raise ValueError("Observed position outside calibrated travel")
+        if self.completed:
+            # Do not silently accept motion after completion.
+            if abs(position_turns - self.position_turns) > 1e-6:
+                raise RuntimeError("Roller moved after stage completion")
+            return
+        self.position_turns = position_turns
+        if self.plan.reached_end(position_turns):
+            self.completed = True
+
     def advance(self, elapsed_seconds: float) -> None:
         if elapsed_seconds < 0:
             raise ValueError('Elapsed time cannot be negative')
