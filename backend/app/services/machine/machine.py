@@ -23,6 +23,8 @@ class Machine:
 
         self._roller_lock = RLock()
         self._roller_owner: str | None = None
+        self._external_stop_pending = 0
+        self._roller_stop_fault = False
         self._roller_external_stop_callback: Callable[[], None] | None = None
 
     @property
@@ -35,6 +37,10 @@ class Machine:
             raise ValueError("Roller owner cannot be empty")
 
         with self._roller_lock:
+            if self._roller_stop_fault:
+                raise RuntimeError("Roller STOP fault is latched")
+            if self._external_stop_pending:
+                raise RuntimeError("Roller external STOP notification is pending")
             if self._roller_owner is not None:
                 raise RuntimeError(f"Roller is reserved by {self._roller_owner}")
 
@@ -51,6 +57,10 @@ class Machine:
         self,
         owner: str | None,
     ) -> None:
+        if self._roller_stop_fault:
+            raise RuntimeError("Roller STOP fault is latched")
+        if self._external_stop_pending:
+            raise RuntimeError("Roller external STOP notification is pending")
         if self._roller_owner is not None and self._roller_owner != owner:
             raise RuntimeError(f"Roller is reserved by {self._roller_owner}")
 
@@ -89,19 +99,38 @@ class Machine:
             try:
                 self.roller.stop()
             except Exception:
-                # При неудачном STOP положение неизвестно.
-                # Владение валом не освобождаем.
+                # An unsuccessful STOP cannot be treated as safe.
+                self._roller_stop_fault = True
                 raise
 
             notify_external = owner != self._roller_owner
+            if notify_external:
+                self._external_stop_pending += 1
 
         if notify_external:
-            self._notify_external_roller_stop()
+            try:
+                self._notify_external_roller_stop()
+            except Exception:
+                with self._roller_lock:
+                    self._roller_stop_fault = True
+                raise
+            finally:
+                with self._roller_lock:
+                    self._external_stop_pending -= 1
 
     def stop_roller_coast(self) -> None:
         with self._roller_lock:
-            self.roller.stop_coast()
-        self._notify_external_roller_stop()
+            try:
+                self.roller.stop_coast()
+            except Exception:
+                self._roller_stop_fault = True
+                raise
+            self._external_stop_pending += 1
+        try:
+            self._notify_external_roller_stop()
+        finally:
+            with self._roller_lock:
+                self._external_stop_pending -= 1
 
     def stop_all(self) -> None:
         errors = []
@@ -121,10 +150,23 @@ class Machine:
                     if name == "roller":
                         roller_stopped = True
                 except Exception as exc:
+                    if name == "roller":
+                        self._roller_stop_fault = True
                     errors.append(f"{name}: {exc}")
 
+            if roller_stopped:
+                self._external_stop_pending += 1
+
         if roller_stopped:
-            self._notify_external_roller_stop()
+            try:
+                self._notify_external_roller_stop()
+            except Exception:
+                with self._roller_lock:
+                    self._roller_stop_fault = True
+                raise
+            finally:
+                with self._roller_lock:
+                    self._external_stop_pending -= 1
 
         if errors:
             raise RuntimeError("Failed to stop drives: " + "; ".join(errors))
