@@ -30,6 +30,7 @@ from app.services.machine.sensors.serial_reference import SerialRollerReferenceS
 from app.services.machine.io_controller import MachineIOController
 from app.services.machine.roller_homing_service import RollerHomingService
 from app.services.machine.roller_homing_runtime import RollerHomingRuntime
+from app.services.machine.calibration.stop_observer_factory import make_roller_stop_observer
 
 from app.core.config import settings
 
@@ -130,6 +131,11 @@ async def lifespan(app: FastAPI):
         machine=created_machine,
         sensor_service=roller_sensor_service,
         rotation_calculator=rotation_calculator,
+        stop_observer=(
+            make_roller_stop_observer(created_machine)
+            if settings.DRIVE_MODE == "real"
+            else None
+        ),
     )
 
     calibration_session_service = CalibrationSessionService(
