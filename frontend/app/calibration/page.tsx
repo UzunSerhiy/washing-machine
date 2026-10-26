@@ -516,12 +516,13 @@ export default function CalibrationPage() {
                 })
               }
             >
-              {homingActive ? "Поиск нуля..." : "Найти ноль (2 Hz)"}
+              {homingActive ? "Поиск нуля..." : "Найти ноль (10 Hz)"}
             </Button>
 
             <p className="text-xs text-muted-foreground">
               Поиск выполняется в обратном направлении. Для остановки используй
-              Stop ниже.
+              Stop ниже. В режиме REAL запуск HOME пока заблокирован сервером;
+              эта кнопка предназначена только для FAKE-тестирования.
             </p>
           </CardContent>
         </Card>
