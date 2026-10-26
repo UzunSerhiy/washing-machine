@@ -30,6 +30,7 @@ class Machine:
         self._roller_owner: str | None = None
         self._external_stop_pending = 0
         self._roller_stop_fault = False
+        self._motion_fault_latched: str | None = None
         self._roller_external_stop_callback: Callable[[], None] | None = None
 
     @property
@@ -69,7 +70,43 @@ class Machine:
         if self._roller_owner is not None and self._roller_owner != owner:
             raise RuntimeError(f"Roller is reserved by {self._roller_owner}")
 
+    @property
+    def motion_fault_latched(self) -> str | None:
+        """Diagnostic latch; physical RESET does not clear this state."""
+        with self._roller_lock:
+            return self._motion_fault_latched
+
+    def poll_motion_faults(self) -> str | None:
+        """One explicit monitoring iteration; caller must schedule polling.
+
+        A detected fault is latched before best-effort STOP. This is not a
+        hard real-time safety mechanism and does not replace a wired E-stop.
+        """
+        if not self._enforce_motion_preflight:
+            return None
+        with self._roller_lock:
+            if self._motion_fault_latched is not None:
+                return self._motion_fault_latched
+            try:
+                require_motion_fault_free((
+                    ("left_brush", self.brush.left_drive),
+                    ("right_brush", self.brush.right_drive),
+                    ("roller", self.roller.drive),
+                ))
+            except Exception as exc:
+                self._motion_fault_latched = str(exc)
+            else:
+                return None
+        try:
+            self.stop_all()
+        except Exception:
+            # Preserve the original fault; failed STOP is separately latched.
+            pass
+        return self.motion_fault_latched
+
     def _check_motion_preflight(self) -> None:
+        if self._motion_fault_latched is not None:
+            raise RuntimeError(f"Motion fault latched: {self._motion_fault_latched}")
         if self._enforce_motion_preflight:
             require_motion_fault_free((
                 ("left_brush", self.brush.left_drive),
