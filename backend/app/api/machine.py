@@ -1219,3 +1219,31 @@ def get_motion_fault_diagnostics():
         "recovery_available": False,
         "diagnostic_only": True,
     }
+
+
+class MotionFaultAcknowledgeRequest(BaseModel):
+    operator_confirmed_stopped: bool
+
+
+@router.post("/motion-fault/acknowledge")
+async def acknowledge_motion_fault(request: MotionFaultAcknowledgeRequest):
+    """Software acknowledgement only; physical E-STOP/RESET is independent."""
+    from app.main import machine, motion_fault_runtime
+    from app.services.machine.motion_fault_recovery import MotionFaultRecoveryService
+    from app.main import drive_service, auto_session_service, calibration_session_service, roller_homing_service
+
+    if settings.DRIVE_MODE != "real" or any(s is None for s in (
+        machine, motion_fault_runtime, auto_session_service, calibration_session_service, roller_homing_service
+    )):
+        raise HTTPException(status_code=503, detail="Real recovery services unavailable")
+    recovery = MotionFaultRecoveryService(machine, drive_service, auto_session_service,
+                                          calibration_session_service, roller_homing_service)
+    try:
+        result = await motion_fault_runtime.acknowledge_exclusive(
+            recovery, operator_confirmed_stopped=request.operator_confirmed_stopped
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"acknowledged": True, "drives_verified": result.drive_ids,
+            "stop_samples": result.consecutive_stop_samples, "homed": False,
+            "automatic_restart": False}

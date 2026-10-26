@@ -43,6 +43,8 @@ class Machine:
             raise ValueError("Roller owner cannot be empty")
 
         with self._roller_lock:
+            if self._motion_fault_latched is not None:
+                raise RuntimeError("Motion fault is latched")
             if self._roller_stop_fault:
                 raise RuntimeError("Roller STOP fault is latched")
             if self._external_stop_pending:
@@ -104,6 +106,13 @@ class Machine:
             pass
         return self.motion_fault_latched
 
+    def complete_motion_fault_recovery(self) -> None:
+        """Clear only the global software latch; caller holds recovery lock."""
+        with self._roller_lock:
+            if self._roller_owner is not None or self._roller_stop_fault or self._external_stop_pending:
+                raise RuntimeError("Roller ownership/STOP fault still active")
+            self._motion_fault_latched = None
+
     def _check_motion_preflight(self) -> None:
         if self._motion_fault_latched is not None:
             raise RuntimeError(f"Motion fault latched: {self._motion_fault_latched}")
@@ -115,8 +124,9 @@ class Machine:
             ))
 
     def start_brush(self, frequency_hz: float) -> None:
-        self._check_motion_preflight()
-        self.brush.start(frequency_hz)
+        with self._roller_lock:
+            self._check_motion_preflight()
+            self.brush.start(frequency_hz)
 
     def stop_brush(self) -> None:
         self.brush.stop()

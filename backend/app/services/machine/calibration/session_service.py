@@ -276,6 +276,11 @@ class CalibrationSessionService:
 
         return session
 
+    def complete_motion_fault_recovery(self) -> None:
+        if self.active or self.auto_mode is not None:
+            raise RuntimeError("CALIBRATION still active")
+        self._motion_fault = None
+
     def external_motion_fault(self, reason: str) -> None:
         """Abort calibration without a second drive command or position update."""
         self._motion_fault = reason

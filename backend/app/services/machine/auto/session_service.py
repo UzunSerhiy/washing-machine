@@ -365,6 +365,13 @@ class AutoSessionService:
 
         raise RuntimeError("Cannot reset fault: recovery checks are incomplete")
 
+    def complete_motion_fault_recovery(self) -> None:
+        """Called only by the coordinated recovery transaction."""
+        if self._prepared is not None or self.operation_service.state.running or self.operation_service.state.paused:
+            raise RuntimeError("AUTO still active")
+        self._position_loop = None
+        self._faulted = False
+
     def get_status(self) -> dict:
         state = self.operation_service.state
         if self._faulted:

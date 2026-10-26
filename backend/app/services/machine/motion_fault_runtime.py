@@ -53,6 +53,17 @@ class MotionFaultRuntime:
                 verify, operator_confirmed_stopped=operator_confirmed_stopped
             )
 
+    async def acknowledge_exclusive(self, recovery, *, operator_confirmed_stopped: bool):
+        """Keep monitor excluded through verification and latch cleanup."""
+        async with self._poll_lock:
+            result = await asyncio.to_thread(
+                recovery.acknowledge, operator_confirmed_stopped=operator_confirmed_stopped
+            )
+            self._notified = False
+            self.last_fault = None
+            self.last_poll_error = None
+            return result
+
     async def _run(self) -> None:
         while True:
             await asyncio.sleep(self.interval_seconds)

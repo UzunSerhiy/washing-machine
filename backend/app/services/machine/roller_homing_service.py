@@ -403,6 +403,31 @@ class RollerHomingService:
         self._stop_confirmations = 0
 
     @_synchronized
+    def complete_motion_fault_recovery(self) -> None:
+        """Software HOME cleanup after global three-drive recovery verification.
+
+        Unlike standalone HOME acknowledgement, monitor faults may happen
+        when HOME never owned the roller.
+        """
+        if self.searching or self._awaiting_stop:
+            raise RuntimeError("HOME still active")
+        owner = self.machine.roller_owner
+        if owner not in (None, self.OWNER):
+            raise RuntimeError("Roller reserved by another service")
+        if owner == self.OWNER:
+            self.machine.release_roller(self.OWNER)
+        self.homing.reset()
+        self._homed = False
+        self._position_turns = 0.0
+        self._faulted = False
+        self._error = None
+        self._fault_code = None
+        self._frequency_hz = None
+        self._last_update_time = None
+        self._home_timing = self._empty_home_timing()
+        self._stop_confirmations = 0
+
+    @_synchronized
     def get_status(self) -> dict:
         return {
             "state": self.homing.state.value,

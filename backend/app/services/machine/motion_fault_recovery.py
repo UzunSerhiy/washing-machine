@@ -63,3 +63,25 @@ class MotionFaultRecoveryService:
                         or frequency != 0):
                     raise RuntimeError(f"Drive {drive_id}: zero frequency not confirmed")
         return RecoveryVerification(expected, 3)
+
+    def acknowledge(self, *, operator_confirmed_stopped: bool) -> RecoveryVerification:
+        """Coordinated software-only recovery; never commands a VFD.
+
+        The machine latch remains in force through verification and cleanup.
+        This must be invoked under MotionFaultRuntime's polling exclusion.
+        """
+        with self.machine._roller_lock:
+            result = self.verify(operator_confirmed_stopped=operator_confirmed_stopped)
+            if self.machine._roller_stop_fault or self.machine._external_stop_pending:
+                raise RuntimeError("Roller STOP fault/pending notification must be resolved separately")
+            if self.machine.roller_owner not in (None, self.homing_service.OWNER):
+                raise RuntimeError("Roller owned by another session")
+            if self.auto_service._prepared is not None:
+                raise RuntimeError("AUTO prepared session must be stopped")
+            # Cleanup methods are software-only and cannot send RUN/STOP.
+            # Global latch is cleared last; failures retain movement blocking.
+            self.homing_service.complete_motion_fault_recovery()
+            self.auto_service.complete_motion_fault_recovery()
+            self.calibration_service.complete_motion_fault_recovery()
+            self.machine.complete_motion_fault_recovery()
+            return result
