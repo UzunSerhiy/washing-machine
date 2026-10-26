@@ -91,6 +91,15 @@ class CalibrationPlayer:
         self._direction = "reverse"
         self._frequency_hz = frequency_hz
 
+    def external_motion_fault(self) -> None:
+        """Discard software motion flags; STOP was attempted by Machine."""
+        self._running = False
+        self._paused = False
+        self._direction = None
+        self._frequency_hz = None
+        self._brush_running = False
+        self._brush_frequency_hz = None
+
     def stop(self) -> None:
         try:
             self.machine.stop_all()

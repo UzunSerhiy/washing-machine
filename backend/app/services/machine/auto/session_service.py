@@ -238,7 +238,7 @@ class AutoSessionService:
         if elapsed_seconds < 0:
             raise ValueError("Elapsed_seconds cannot be negative")
 
-        if self._prepared is None:
+        if self._prepared is None or self._faulted:
             return
 
         try:
@@ -413,6 +413,16 @@ class AutoSessionService:
                 else False
             ),
         }
+
+    def external_motion_fault(self, reason: str) -> None:
+        """Latch a monitored VFD fault without issuing another STOP."""
+        self._faulted = True
+        if self._position_loop is not None:
+            self._position_loop.position.invalidate()
+            self._position_loop = None
+        state = self.operation_service.state
+        state.running = False
+        state.paused = False
 
     def _handle_controller_fault(self) -> None:
         self._faulted = True

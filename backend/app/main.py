@@ -176,7 +176,17 @@ async def lifespan(app: FastAPI):
     await calibration_runtime.start()
 
     if settings.DRIVE_MODE == "real":
-        motion_fault_runtime = MotionFaultRuntime(created_machine)
+        def notify_motion_fault(reason: str) -> None:
+            # Keep notifying independent services even if one handler fails.
+            import logging
+            logger = logging.getLogger(__name__)
+            for service in (auto_session_service, calibration_session_service, roller_homing_service):
+                try:
+                    service.external_motion_fault(reason)
+                except Exception:
+                    logger.exception("Failed to propagate monitored motion fault to %s", type(service).__name__)
+
+        motion_fault_runtime = MotionFaultRuntime(created_machine, on_fault=notify_motion_fault)
         await motion_fault_runtime.start()
 
     if settings.DRIVE_MODE == "fake":

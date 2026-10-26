@@ -292,6 +292,22 @@ class RollerHomingService:
             self.machine.release_roller(self.OWNER)
 
     @_synchronized
+    def external_motion_fault(self, reason: str) -> None:
+        """Latch external VFD failure, invalidate Point0, retain HOME ownership."""
+        active = self.searching or self._awaiting_stop
+        self._homed = False
+        self._awaiting_stop = False
+        self._stop_deadline = None
+        self._faulted = True
+        self._error = reason
+        self._fault_code = "VFD_MONITOR_FAULT"
+        self._last_update_time = None
+        self._frequency_hz = None
+        if active:
+            self.homing._fail(reason)
+        # No STOP here: Machine already attempted it. Do not release ownership.
+
+    @_synchronized
     def invalidate(self) -> None:
         self._homed = False
 

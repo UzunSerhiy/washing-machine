@@ -33,12 +33,15 @@ class CalibrationSessionService:
         self._water_reverse_started = False
         self._auto_paused = False
         self.roller_homing_service = None
+        self._motion_fault: str | None = None
 
     @property
     def active(self) -> bool:
         return self._session is not None
 
     def start(self, material_profile_id: int) -> CalibrationSession:
+        if self._motion_fault is not None:
+            raise RuntimeError(f"Calibration motion fault latched: {self._motion_fault}")
         if self._session is not None:
             raise RuntimeError("Calibration session is already active")
 
@@ -68,6 +71,8 @@ class CalibrationSessionService:
         self.roller_homing_service = service
 
     def get_current(self) -> CalibrationSession:
+        if self._motion_fault is not None:
+            raise RuntimeError(f"Calibration motion fault latched: {self._motion_fault}")
         if self._session is None:
             raise RuntimeError("Calibration session is not active")
 
@@ -270,6 +275,18 @@ class CalibrationSessionService:
         self._last_update_time = None
 
         return session
+
+    def external_motion_fault(self, reason: str) -> None:
+        """Abort calibration without a second drive command or position update."""
+        self._motion_fault = reason
+        if self._session is not None:
+            self._session.player.external_motion_fault()
+        self._session = None
+        self._auto_unwinding = False
+        self._auto_winding = False
+        self._auto_paused = False
+        self._saved = False
+        self._last_update_time = None
 
     def tick(self) -> None:
         if self._session is None:
