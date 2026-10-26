@@ -1235,3 +1235,45 @@ def test_reset_fault_validation_order(
     assert calls == expected_calls
     assert service._faulted is True
     assert operation_service.state.running is False
+
+
+def test_position_loop_can_be_bound_while_idle_without_activation():
+    from app.services.machine.auto.position_loop import AutoPositionLoop
+    service = AutoSessionService(1, FakeOperationService(), FakeSpeedSettingsService())
+    loop = Mock(spec=AutoPositionLoop)
+    loop.position = Mock()
+    loop.position.snapshot.valid = True
+    service.bind_position_loop(loop)
+    assert service.position_loop is loop
+    assert service._prepared is None
+
+
+def test_position_loop_binding_rejected_when_running_or_unreferenced():
+    from app.services.machine.auto.position_loop import AutoPositionLoop
+    operation = FakeOperationService()
+    service = AutoSessionService(1, operation, FakeSpeedSettingsService())
+    loop = Mock(spec=AutoPositionLoop)
+    loop.position = Mock()
+    loop.position.snapshot.valid = False
+    with pytest.raises(RuntimeError, match="HOME referenced"):
+        service.bind_position_loop(loop)
+    loop.position.snapshot.valid = True
+    operation.state.running = True
+    with pytest.raises(RuntimeError, match="during a session"):
+        service.bind_position_loop(loop)
+    assert service.position_loop is None
+
+
+def test_position_loop_invalidated_on_controller_fault():
+    from app.services.machine.auto.position_loop import AutoPositionLoop
+    operation = FakeOperationService()
+    operation.machine.stop_all = Mock()
+    service = AutoSessionService(1, operation, FakeSpeedSettingsService())
+    loop = Mock(spec=AutoPositionLoop)
+    loop.position = Mock()
+    loop.position.snapshot.valid = True
+    service.bind_position_loop(loop)
+    service._handle_controller_fault()
+    loop.position.invalidate.assert_called_once_with()
+    assert service.position_loop is None
+    operation.machine.stop_all.assert_called_once_with()

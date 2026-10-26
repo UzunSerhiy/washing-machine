@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+
+from app.services.machine.auto.position_loop import AutoPositionLoop
 from typing import Any
 
 from app.services.machine.operation import AutoStage, OperationMode
@@ -64,9 +66,25 @@ class AutoSessionService:
         self._prepared: PreparedAutoStage | None = None
         self._faulted = False
         self.roller_homing_service = None
+        # Reserved for the future position-driven AUTO path. Legacy tick remains active.
+        self._position_loop: AutoPositionLoop | None = None
 
     def set_roller_homing_service(self, service) -> None:
         self.roller_homing_service = service
+
+    def bind_position_loop(self, loop: AutoPositionLoop) -> None:
+        """Register a referenced loop while idle; do not activate it yet."""
+        if self._prepared is not None or self.operation_service.state.running or self.operation_service.state.paused:
+            raise RuntimeError("Cannot bind AUTO position loop during a session")
+        if self._faulted:
+            raise RuntimeError("Cannot bind AUTO position loop in fault state")
+        if not loop.position.snapshot.valid:
+            raise RuntimeError("Position must be HOME referenced")
+        self._position_loop = loop
+
+    @property
+    def position_loop(self) -> AutoPositionLoop | None:
+        return self._position_loop
 
     async def prepare(
         self,
@@ -324,6 +342,7 @@ class AutoSessionService:
             state.running = False
             state.paused = False
             self._prepared = None
+            self._position_loop = None
 
     def reset_fault(self) -> None:
         if self._prepared is not None:
@@ -397,6 +416,9 @@ class AutoSessionService:
 
     def _handle_controller_fault(self) -> None:
         self._faulted = True
+        if self._position_loop is not None:
+            self._position_loop.position.invalidate()
+            self._position_loop = None
 
         state = self.operation_service.state
         state.running = False
