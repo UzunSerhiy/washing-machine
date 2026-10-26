@@ -1,3 +1,4 @@
+import { Point0Dialog } from '@/components/machine/point0-dialog';
 'use client';
 
 import { useState } from 'react';
@@ -48,7 +49,8 @@ export default function ManualPage() {
   }
 
   if (isPending) {
-    return <main className="p-8">Loading machine...</main>;
+    return <main className="p-8">
+      <div className="mb-4"><Point0Dialog /></div>Loading machine...</main>;
   }
 
   if (isError) {

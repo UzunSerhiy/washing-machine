@@ -1,3 +1,4 @@
+import { Point0Dialog } from '@/components/machine/point0-dialog';
 'use client';
 
 import { useState } from 'react';
@@ -88,6 +89,7 @@ export default function AutoPage() {
 
   return (
     <main className="mx-auto max-w-5xl space-y-6 p-6">
+      <div className="mb-4"><Point0Dialog /></div>
       <div>
         <h1 className="text-3xl font-bold">Automatic Control</h1>
         <p className="text-muted-foreground">Winding machine · AUTO mode</p>
