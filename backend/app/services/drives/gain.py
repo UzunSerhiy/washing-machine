@@ -65,10 +65,29 @@ class GainDrive(BaseDrive):
             device_id=self.device_id,
         )
 
+    def _require_fault_free(self) -> None:
+        """Fail closed on fault or unreadable/invalid fault telemetry."""
+        try:
+            fault = self.get_fault()
+        except Exception as exc:
+            raise RuntimeError(
+                f"GAIN {self.device_id}: cannot start, fault telemetry unavailable"
+            ) from exc
+        if type(fault) is not int or not 0 <= fault <= 0xFFFF:
+            raise RuntimeError(
+                f"GAIN {self.device_id}: cannot start, invalid fault telemetry"
+            )
+        if fault:
+            raise RuntimeError(
+                f"GAIN {self.device_id}: cannot start, VFD fault {fault}"
+            )
+
     def run_forward(self) -> None:
+        self._require_fault_free()
         self._send_command(self.CMD_FORWARD)
 
     def run_reverse(self) -> None:
+        self._require_fault_free()
         self._send_command(self.CMD_REVERSE)
 
     def stop(self) -> None:
