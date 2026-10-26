@@ -6,7 +6,7 @@ from app.services.machine.roller import Roller
 
 class MachineFactory:
     @staticmethod
-    def create(drive_service: DriveService) -> Machine:
+    def create(drive_service: DriveService, *, motion_fault_store=None) -> Machine:
         left_drive = None
         right_drive = None
         roller_drive = None
@@ -37,6 +37,7 @@ class MachineFactory:
 
         return Machine(
             enforce_motion_preflight=drive_service.mode == "real",
+            motion_fault_store=motion_fault_store,
             brush=Brush(
                 left_drive=left_drive,
                 right_drive=right_drive,

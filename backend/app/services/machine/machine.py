@@ -21,6 +21,7 @@ class Machine:
         roller: Roller,
         *,
         enforce_motion_preflight: bool = False,
+        motion_fault_store=None,
     ) -> None:
         self.brush = brush
         self.roller = roller
@@ -30,8 +31,27 @@ class Machine:
         self._roller_owner: str | None = None
         self._external_stop_pending = 0
         self._roller_stop_fault = False
-        self._motion_fault_latched: str | None = None
+        self._motion_fault_store = motion_fault_store
+        self._motion_fault_latched: str | None = (
+            motion_fault_store.read_latch() if motion_fault_store is not None else None
+        )
         self._roller_external_stop_callback: Callable[[], None] | None = None
+
+    def arm_startup_interlock(self) -> None:
+        """REAL startup: require a fresh operator acknowledgement on every boot.
+
+        Persist the interlock before the API can serve motion commands. If the
+        storage write fails, startup must fail rather than expose a clean latch.
+        """
+        if self._motion_fault_store is None:
+            return
+        with self._roller_lock:
+            if self._motion_fault_latched is None:
+                self._motion_fault_latched = "Motion blocked: backend restarted; operator acknowledgement required"
+            try:
+                self._motion_fault_store.write_latch(self._motion_fault_latched)
+            except Exception as exc:
+                raise RuntimeError("Cannot persist startup motion interlock; refusing startup") from exc
 
     @property
     def roller_owner(self) -> str | None:
@@ -97,6 +117,12 @@ class Machine:
                 ))
             except Exception as exc:
                 self._motion_fault_latched = str(exc)
+                if self._motion_fault_store is not None:
+                    try:
+                        self._motion_fault_store.write_latch(self._motion_fault_latched)
+                    except OSError:
+                        # Never clear the in-memory latch if persistence fails.
+                        pass
             else:
                 return None
         try:
@@ -111,6 +137,11 @@ class Machine:
         with self._roller_lock:
             if self._roller_owner is not None or self._roller_stop_fault or self._external_stop_pending:
                 raise RuntimeError("Roller ownership/STOP fault still active")
+            if self._motion_fault_store is not None:
+                try:
+                    self._motion_fault_store.write_latch(None)
+                except OSError as exc:
+                    raise RuntimeError("Cannot persist motion fault acknowledgement") from exc
             self._motion_fault_latched = None
 
     def _check_motion_preflight(self) -> None:

@@ -1,5 +1,6 @@
-import { Point0Dialog } from '@/components/machine/point0-dialog';
 "use client";
+
+import { Point0Dialog } from "@/components/machine/point0-dialog";
 
 import { useState } from "react";
 import axios from "axios";
@@ -333,7 +334,9 @@ export default function CalibrationPage() {
 
   return (
     <main className="mx-auto max-w-5xl space-y-6 p-6">
-      <div className="mb-4"><Point0Dialog /></div>
+      <div className="mb-4">
+        <Point0Dialog />
+      </div>
       <div>
         <h1 className="text-3xl font-bold">Калибровка</h1>
         <p className="text-muted-foreground">

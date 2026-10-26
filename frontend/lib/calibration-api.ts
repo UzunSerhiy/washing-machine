@@ -97,7 +97,7 @@ export async function stopCalibrationBrush() {
 }
 
 export async function getCalibrationHome() {
-  const response = await api.get<CalibrationHomeStatus>(`${BASE}/home`);
+  const response = await api.get<CalibrationHomeStatus>("/api/machine/home");
   return response.data;
 }
 

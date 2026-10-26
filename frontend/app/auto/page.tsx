@@ -1,16 +1,21 @@
-import { Point0Dialog } from '@/components/machine/point0-dialog';
-'use client';
+"use client";
 
-import { useState } from 'react';
-import axios from 'axios';
+import { Point0Dialog } from "@/components/machine/point0-dialog";
 
-import { useAutoSession, useAutoCommand, useSelectAutoMaterial } from '@/hooks/use-auto';
+import { useState } from "react";
+import axios from "axios";
 
-import type { AutoCommand } from '@/types/auto';
+import {
+  useAutoSession,
+  useAutoCommand,
+  useSelectAutoMaterial,
+} from "@/hooks/use-auto";
 
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useMaterialProfiles } from '@/hooks/use-material-profiles';
+import type { AutoCommand } from "@/types/auto";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useMaterialProfiles } from "@/hooks/use-material-profiles";
 
 import {
   Select,
@@ -18,24 +23,24 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
+} from "@/components/ui/select";
 
 function getErrorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
     const detail = error.response?.data?.detail;
 
-    if (typeof detail === 'string') {
+    if (typeof detail === "string") {
       return detail;
     }
 
     return error.message;
   }
 
-  return error instanceof Error ? error.message : 'Unknown error';
+  return error instanceof Error ? error.message : "Unknown error";
 }
 
 export default function AutoPage() {
-  const [materialId, setMaterialId] = useState('');
+  const [materialId, setMaterialId] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const { data: session, isLoading, isError } = useAutoSession();
@@ -50,7 +55,7 @@ export default function AutoPage() {
   const selectMaterial = useSelectAutoMaterial();
 
   const busy = command.isPending || selectMaterial.isPending;
-  const status = session?.status ?? 'IDLE';
+  const status = session?.status ?? "IDLE";
 
   async function handleCommand(action: AutoCommand) {
     setError(null);
@@ -68,7 +73,7 @@ export default function AutoPage() {
     const id = Number(materialId);
 
     if (!Number.isInteger(id) || id <= 0) {
-      setError('Enter a valid material ID');
+      setError("Enter a valid material ID");
       return;
     }
 
@@ -84,12 +89,16 @@ export default function AutoPage() {
   }
 
   if (isError || !session) {
-    return <div className="p-6 text-red-500">Cannot connect to AUTO session</div>;
+    return (
+      <div className="p-6 text-red-500">Cannot connect to AUTO session</div>
+    );
   }
 
   return (
     <main className="mx-auto max-w-5xl space-y-6 p-6">
-      <div className="mb-4"><Point0Dialog /></div>
+      <div className="mb-4">
+        <Point0Dialog />
+      </div>
       <div>
         <h1 className="text-3xl font-bold">Automatic Control</h1>
         <p className="text-muted-foreground">Winding machine · AUTO mode</p>
@@ -100,11 +109,13 @@ export default function AutoPage() {
         </CardHeader>
 
         <CardContent className="flex flex-wrap items-center gap-3">
-          {materialsError && <p className="text-sm text-red-500">Failed to load materials</p>}
+          {materialsError && (
+            <p className="text-sm text-red-500">Failed to load materials</p>
+          )}
           <Select
             value={materialId}
-            onValueChange={(value) => setMaterialId(value ?? '')}
-            disabled={busy || status !== 'IDLE' || materialsLoading}
+            onValueChange={(value) => setMaterialId(value ?? "")}
+            disabled={busy || status !== "IDLE" || materialsLoading}
           >
             <SelectTrigger className="w-64">
               <SelectValue placeholder="Select material" />
@@ -117,17 +128,21 @@ export default function AutoPage() {
                 </SelectItem>
               ))}
             </SelectContent>
-          </Select>{' '}
+          </Select>{" "}
           <Button
             onClick={handleSelectMaterial}
             disabled={
-              busy || status !== 'IDLE' || !materialId || materialsLoading || materialsError
+              busy ||
+              status !== "IDLE" ||
+              !materialId ||
+              materialsLoading ||
+              materialsError
             }
           >
             Select Material
           </Button>
           <span className="text-sm text-muted-foreground">
-            Selected: {session.material_profile_id ?? 'None'}
+            Selected: {session.material_profile_id ?? "None"}
           </span>
         </CardContent>
       </Card>
@@ -144,32 +159,36 @@ export default function AutoPage() {
 
           <div>
             <p className="text-sm text-muted-foreground">Stage</p>
-            <p className="text-xl">{session.stage ?? '—'}</p>
+            <p className="text-xl">{session.stage ?? "—"}</p>
           </div>
 
           <div>
             <p className="text-sm text-muted-foreground">Speed</p>
             <p className="text-xl">
-              {session.speed_percent === null ? '—' : `${session.speed_percent}%`}
+              {session.speed_percent === null
+                ? "—"
+                : `${session.speed_percent}%`}
             </p>
           </div>
 
           <div>
             <p className="text-sm text-muted-foreground">Phase</p>
-            <p className="text-xl">{session.phase ?? '—'}</p>
+            <p className="text-xl">{session.phase ?? "—"}</p>
           </div>
 
           <div>
             <p className="text-sm text-muted-foreground">Roller position</p>
             <p className="text-3xl font-mono">
-              {session.position_turns === null ? '—' : session.position_turns.toFixed(3)}
+              {session.position_turns === null
+                ? "—"
+                : session.position_turns.toFixed(3)}
             </p>
             <p className="text-xs text-muted-foreground">turns</p>
           </div>
 
           <div>
             <p className="text-sm text-muted-foreground">Completed</p>
-            <p className="text-xl">{session.completed ? 'Yes' : 'No'}</p>
+            <p className="text-xl">{session.completed ? "Yes" : "No"}</p>
           </div>
         </CardContent>
       </Card>
@@ -180,26 +199,38 @@ export default function AutoPage() {
 
         <CardContent>
           <div className="flex flex-wrap items-center gap-3">
-            <Button disabled={busy || status !== 'IDLE'} onClick={() => handleCommand('prepare')}>
+            <Button
+              disabled={busy || status !== "IDLE"}
+              onClick={() => handleCommand("prepare")}
+            >
               Prepare
             </Button>
 
-            <Button disabled={busy || status !== 'PREPARED'} onClick={() => handleCommand('start')}>
+            <Button
+              disabled={busy || status !== "PREPARED"}
+              onClick={() => handleCommand("start")}
+            >
               Start
             </Button>
 
-            <Button disabled={busy || status !== 'RUNNING'} onClick={() => handleCommand('pause')}>
+            <Button
+              disabled={busy || status !== "RUNNING"}
+              onClick={() => handleCommand("pause")}
+            >
               Pause
             </Button>
 
-            <Button disabled={busy || status !== 'PAUSED'} onClick={() => handleCommand('resume')}>
+            <Button
+              disabled={busy || status !== "PAUSED"}
+              onClick={() => handleCommand("resume")}
+            >
               Resume
             </Button>
 
             <Button
               variant="destructive"
-              disabled={busy || status === 'IDLE'}
-              onClick={() => handleCommand('stop')}
+              disabled={busy || status === "IDLE"}
+              onClick={() => handleCommand("stop")}
             >
               Stop
             </Button>

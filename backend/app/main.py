@@ -15,6 +15,7 @@ from app.services.drives.service import DriveService
 from app.services.machine.factory import MachineFactory
 from app.services.machine.machine import Machine
 from app.services.machine.motion_fault_runtime import MotionFaultRuntime
+from app.services.machine.motion_fault_store import MotionFaultStore
 from app.services.machine.service import MachineService
 from app.services.machine.operation_service import MachineOperationService
 from app.services.machine.calibration.session_service import CalibrationSessionService
@@ -75,7 +76,13 @@ async def lifespan(app: FastAPI):
             drive_service=drive_service,
         )
 
-    created_machine = MachineFactory.create(drive_service)
+    # Backend directory is bind-mounted in docker-compose; never use /tmp for this.
+    # Operators may override to another durable volume with MOTION_FAULT_STATE_PATH.
+    fault_store = (MotionFaultStore(os.getenv("MOTION_FAULT_STATE_PATH", "/app/.motion_fault_state.json"))
+                   if settings.DRIVE_MODE == "real" else None)
+    created_machine = MachineFactory.create(drive_service, motion_fault_store=fault_store)
+    if fault_store is not None:
+        created_machine.arm_startup_interlock()
 
     machine = created_machine
 

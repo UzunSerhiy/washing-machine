@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     SERIAL_PORT: str = "/dev/ttyUSB0"
     BAUDRATE: int = 9600
 
-    DRIVE_MODE: str = "fake"
+    DRIVE_MODE: str = "real"
 
     ROLLER_MOTOR_RPM_AT_50HZ: float = 905.0
     ROLLER_GEAR_RATIO: float = 100.0

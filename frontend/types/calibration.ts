@@ -44,9 +44,13 @@ export interface CalibrationCompleteResponse {
 
 
 export interface CalibrationHomeStatus {
-  available: boolean;
   state: "idle" | "searching" | "completed" | "cancelled" | "error" | null;
   error: string | null;
+  homed: boolean;
+  faulted: boolean;
+  searching: boolean;
+  position_turns: number;
+  roller_owner: string | null;
 }
 
 export interface RollerReferenceState {

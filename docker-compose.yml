@@ -27,7 +27,7 @@ services:
       - '8001:8000'
     devices:
       - /dev/ttyACM0:/dev/ttyACM0
-      # - /dev/ttyUSB0:/dev/ttyUSB0
+      - /dev/ttyUSB0:/dev/ttyUSB0
     group_add:
       - "984"
     volumes:

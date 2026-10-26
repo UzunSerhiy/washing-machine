@@ -31,3 +31,6 @@ frontend/*.tsbuildinfo
 *.old
 *.orig
 
+
+# Persistent REAL-mode motion fault state
+backend/.motion_fault_state.json
