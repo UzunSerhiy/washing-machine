@@ -2,6 +2,9 @@ import logging
 import math
 from functools import wraps
 from threading import RLock
+from typing import Callable
+
+from app.services.machine.calibration.stop_confirmation import StopObservation
 
 from app.services.machine.calibration.clock import MonotonicClock
 from app.services.machine.calibration.homing import (
@@ -33,11 +36,16 @@ class RollerHomingService:
         machine: Machine,
         sensor_service: RollerSensorService,
         rotation_calculator: RollerRotationCalculator,
+        stop_observer: Callable[[], StopObservation] | None = None,
     ) -> None:
         self._state_lock = RLock()
         self.machine = machine
         self.rotation_calculator = rotation_calculator
         self.clock = MonotonicClock()
+        self._stop_observer = stop_observer
+        self._awaiting_stop = False
+        self._stop_deadline: float | None = None
+        self._stop_confirmations = 0
 
         self.homing = HomingService(
             sensor_service=sensor_service,
@@ -82,8 +90,8 @@ class RollerHomingService:
         if self._faulted:
             raise RuntimeError("Homing fault is latched. Recovery is required.")
 
-        if self.searching:
-            raise RuntimeError("Homing is already running")
+        if self.searching or self._awaiting_stop:
+            raise RuntimeError("Homing is already running or awaiting stop confirmation")
 
         if not position_confirmed:
             raise RuntimeError(
@@ -129,11 +137,14 @@ class RollerHomingService:
 
     @_synchronized
     def tick(self) -> None:
-        if not self.searching:
+        if not self.searching and not self._awaiting_stop:
             return
 
         try:
             now = self.clock.now()
+            if self._awaiting_stop:
+                self._poll_stop(now)
+                return
 
             if self._last_update_time is None or self._frequency_hz is None:
                 raise RuntimeError("Homing runtime is not initialized")
@@ -174,24 +185,41 @@ class RollerHomingService:
             raise
 
     def _complete(self) -> None:
-        # Если STOP выбросит исключение, владение
-        # не будет освобождено.
+        # Command acknowledgement is not proof of a stopped drive.
         self.machine.stop_roller(owner=self.OWNER)
+        if self._stop_observer is not None:
+            self._awaiting_stop = True
+            self._stop_deadline = self.clock.now() + 5.0
+            self._stop_confirmations = 0
+            return
+        # Legacy path is retained for existing FAKE-only callers.
+        self._finish_stop()
 
-        # Только для FAKE: успешная команда STOP
-        # считается достаточной для завершения.
+    def _poll_stop(self, now: float) -> None:
+        if self._stop_deadline is None or now > self._stop_deadline:
+            raise RuntimeError("Roller VFD stop confirmation timeout")
+        observation = self._stop_observer()
+        self._stop_confirmations = self._stop_confirmations + 1 if observation.confirmed else 0
+        if self._stop_confirmations >= 3:
+            self._finish_stop()
+
+    def _finish_stop(self) -> None:
+        # This verifies drive telemetry, not absolute mechanical shaft position.
         self._homed = True
         self._position_turns = 0.0
         self._last_update_time = None
         self._frequency_hz = None
-
+        self._awaiting_stop = False
+        self._stop_deadline = None
+        self._stop_confirmations = 0
         self.machine.release_roller(self.OWNER)
 
     @_synchronized
     def cancel(self) -> None:
-        if not self.searching:
+        if not self.searching and not self._awaiting_stop:
             return
 
+        self._awaiting_stop = False
         self._homed = False
         self.homing.cancel()
 
@@ -213,6 +241,8 @@ class RollerHomingService:
 
     def _fail_and_stop(self, message: str) -> None:
         self._homed = False
+        self._awaiting_stop = False
+        self._stop_deadline = None
         self._faulted = True
         self._error = message
 
@@ -238,6 +268,7 @@ class RollerHomingService:
             "homed": self.homed,
             "faulted": self._faulted,
             "searching": self.searching,
+            "awaiting_stop_confirmation": self._awaiting_stop,
             "position_turns": self._position_turns,
             "roller_owner": self.machine.roller_owner,
         }
@@ -250,9 +281,10 @@ class RollerHomingService:
         Не отправляет повторный STOP.
         Вызывается Machine после успешной команды остановки.
         """
-        if not self.searching:
+        if not self.searching and not self._awaiting_stop:
             return
 
+        self._awaiting_stop = False
         self._homed = False
         self.homing.cancel()
         self._error = "Homing interrupted by external STOP"
