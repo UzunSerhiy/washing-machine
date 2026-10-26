@@ -1192,3 +1192,10 @@ def cancel_roller_home():
         ) from exc
 
     return service.get_status()
+
+@router.get("/readiness")
+def get_machine_readiness():
+    """Read-only snapshot. Does not authorize motion or reset faults."""
+    from app.services.machine.readiness_diagnostics import get_readiness_snapshot
+
+    return get_readiness_snapshot(get_drive_service(), get_roller_homing_service())
