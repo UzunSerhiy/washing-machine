@@ -1199,3 +1199,23 @@ def get_machine_readiness():
     from app.services.machine.readiness_diagnostics import get_readiness_snapshot
 
     return get_readiness_snapshot(get_drive_service(), get_roller_homing_service())
+
+
+@router.get("/motion-fault")
+def get_motion_fault_diagnostics():
+    """Read-only software latch diagnostics; does not authorize motion."""
+    from app.main import machine as active_machine, motion_fault_runtime
+
+    if active_machine is None:
+        raise HTTPException(status_code=503, detail="Machine is not initialized")
+    reason = active_machine.motion_fault_latched
+    runtime = motion_fault_runtime
+    return {
+        "latched": reason is not None,
+        "reason": reason,
+        "monitor_running": runtime.running if runtime is not None else False,
+        "last_poll_error": runtime.last_poll_error if runtime is not None else None,
+        "monitor_last_fault": runtime.last_fault if runtime is not None else None,
+        "recovery_available": False,
+        "diagnostic_only": True,
+    }
