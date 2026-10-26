@@ -4,6 +4,8 @@ from app.services.machine.brush import Brush
 from app.services.machine.roller import Roller
 from collections.abc import Callable
 
+from app.services.machine.motion_preflight import require_motion_fault_free
+
 
 class Machine:
     """
@@ -17,9 +19,12 @@ class Machine:
         self,
         brush: Brush,
         roller: Roller,
+        *,
+        enforce_motion_preflight: bool = False,
     ) -> None:
         self.brush = brush
         self.roller = roller
+        self._enforce_motion_preflight = enforce_motion_preflight
 
         self._roller_lock = RLock()
         self._roller_owner: str | None = None
@@ -64,7 +69,16 @@ class Machine:
         if self._roller_owner is not None and self._roller_owner != owner:
             raise RuntimeError(f"Roller is reserved by {self._roller_owner}")
 
+    def _check_motion_preflight(self) -> None:
+        if self._enforce_motion_preflight:
+            require_motion_fault_free((
+                ("left_brush", self.brush.left_drive),
+                ("right_brush", self.brush.right_drive),
+                ("roller", self.roller.drive),
+            ))
+
     def start_brush(self, frequency_hz: float) -> None:
+        self._check_motion_preflight()
         self.brush.start(frequency_hz)
 
     def stop_brush(self) -> None:
@@ -78,6 +92,7 @@ class Machine:
     ) -> None:
         with self._roller_lock:
             self._require_roller_access(owner)
+            self._check_motion_preflight()
             self.roller.forward(frequency_hz)
 
     def start_roller_reverse(
@@ -88,6 +103,7 @@ class Machine:
     ) -> None:
         with self._roller_lock:
             self._require_roller_access(owner)
+            self._check_motion_preflight()
             self.roller.reverse(frequency_hz)
 
     def stop_roller(

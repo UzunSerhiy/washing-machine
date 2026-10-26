@@ -36,6 +36,7 @@ class MachineFactory:
             raise ValueError("Roller drive is not configured")
 
         return Machine(
+            enforce_motion_preflight=drive_service.mode == "real",
             brush=Brush(
                 left_drive=left_drive,
                 right_drive=right_drive,
