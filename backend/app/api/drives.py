@@ -19,6 +19,15 @@ def get_drive_service() -> DriveService:
 
 
 def require_direct_drive_access(drive_id: int) -> None:
+    # All REAL drive writes must pass through Machine, which owns the
+    # motion-fault latch and the shared motion preflight.
+    from app.core.config import settings
+    if settings.DRIVE_MODE == "real":
+        raise HTTPException(
+            status_code=409,
+            detail="Direct drive motion commands are disabled in real mode; use /api/machine",
+        )
+
     service = get_drive_service()
     config = service.configs.get(drive_id)
 
