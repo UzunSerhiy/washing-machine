@@ -38,7 +38,12 @@ class AutoPositionLoop:
             direction=applied_direction,
             sensor=sensor,
         )
-        self.stage.observe_position(snapshot.position_turns)
+        try:
+            self.stage.observe_position(snapshot.position_turns)
+        except (ValueError, RuntimeError):
+            # A rejected coordinate cannot be trusted for subsequent AUTO ticks.
+            self.position.invalidate()
+            raise
         return AutoPositionTick(
             position=snapshot,
             next_frequency_hz=0.0 if self.stage.completed else self.stage.frequency_hz,

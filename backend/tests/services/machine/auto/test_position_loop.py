@@ -65,3 +65,25 @@ def test_requires_home():
                                 80, 0, Curve(), rotation, SpeedLayer())
     with pytest.raises(RuntimeError, match="HOME"):
         AutoPositionLoop(position, stage)
+
+
+def test_out_of_bounds_position_invalidates_home():
+    loop = make_loop()
+    with pytest.raises(ValueError, match="outside calibrated travel"):
+        loop.tick(elapsed_seconds=40, applied_frequency_hz=50,
+                  applied_direction=1, sensor=sensor())
+    assert not loop.position.snapshot.valid
+    with pytest.raises(RuntimeError, match="HOME required"):
+        loop.tick(elapsed_seconds=0, applied_frequency_hz=0,
+                  applied_direction=0, sensor=sensor())
+
+
+def test_movement_after_completion_invalidates_home():
+    loop = make_loop()
+    loop.tick(elapsed_seconds=0, applied_frequency_hz=50,
+              applied_direction=1, sensor=sensor(5))
+    assert loop.stage.completed
+    with pytest.raises(ValueError, match="outside calibrated travel"):
+        loop.tick(elapsed_seconds=1, applied_frequency_hz=20,
+                  applied_direction=1, sensor=sensor(5))
+    assert not loop.position.snapshot.valid
