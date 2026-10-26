@@ -46,6 +46,7 @@ class RollerHomingService:
         self._awaiting_stop = False
         self._stop_deadline: float | None = None
         self._stop_confirmations = 0
+        self._home_timing: dict[str, float | None] = self._empty_home_timing()
 
         self.homing = HomingService(
             sensor_service=sensor_service,
@@ -59,6 +60,34 @@ class RollerHomingService:
         self._homed = False
         self._faulted = False
         self._error: str | None = None
+
+    @staticmethod
+    def _empty_home_timing() -> dict[str, float | None]:
+        return {
+            "pulse_detected_at": None,
+            "stop_requested_at": None,
+            "stop_command_returned_at": None,
+            "stop_confirmed_at": None,
+        }
+
+    def _timing_status(self) -> dict:
+        timing = self._home_timing.copy()
+        pulse = timing["pulse_detected_at"]
+        requested = timing["stop_requested_at"]
+        returned = timing["stop_command_returned_at"]
+        confirmed = timing["stop_confirmed_at"]
+
+        def milliseconds(start, end):
+            return round((end - start) * 1000, 3) if start is not None and end is not None else None
+
+        return {
+            "events_monotonic_seconds": timing,
+            "pulse_to_stop_request_ms": milliseconds(pulse, requested),
+            "stop_command_duration_ms": milliseconds(requested, returned),
+            "stop_request_to_confirmation_ms": milliseconds(requested, confirmed),
+            "pulse_to_confirmation_ms": milliseconds(pulse, confirmed),
+            "stop_confirmations_observed": self._stop_confirmations,
+        }
 
     @property
     @_synchronized
@@ -120,6 +149,7 @@ class RollerHomingService:
 
         self._homed = False
         self._error = None
+        self._home_timing = self._empty_home_timing()
         self._position_turns = 0.0
         self._frequency_hz = frequency_hz
         self._last_update_time = now
@@ -174,6 +204,7 @@ class RollerHomingService:
                 return
 
             if self.homing.state == HomingState.COMPLETED:
+                self._home_timing["pulse_detected_at"] = now
                 self._complete()
                 return
 
@@ -186,7 +217,9 @@ class RollerHomingService:
 
     def _complete(self) -> None:
         # Command acknowledgement is not proof of a stopped drive.
+        self._home_timing["stop_requested_at"] = self.clock.now()
         self.machine.stop_roller(owner=self.OWNER)
+        self._home_timing["stop_command_returned_at"] = self.clock.now()
         if self._stop_observer is not None:
             self._awaiting_stop = True
             self._stop_deadline = self.clock.now() + 5.0
@@ -201,6 +234,7 @@ class RollerHomingService:
         observation = self._stop_observer()
         self._stop_confirmations = self._stop_confirmations + 1 if observation.confirmed else 0
         if self._stop_confirmations >= 3:
+            self._home_timing["stop_confirmed_at"] = self.clock.now()
             self._finish_stop()
 
     def _finish_stop(self) -> None:
@@ -271,6 +305,7 @@ class RollerHomingService:
             "awaiting_stop_confirmation": self._awaiting_stop,
             "position_turns": self._position_turns,
             "roller_owner": self.machine.roller_owner,
+            "timing": self._timing_status(),
         }
 
     @_synchronized
