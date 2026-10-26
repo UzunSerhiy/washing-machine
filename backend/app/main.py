@@ -14,6 +14,7 @@ from app.services.drives.configurator import configure_drives
 from app.services.drives.service import DriveService
 from app.services.machine.factory import MachineFactory
 from app.services.machine.machine import Machine
+from app.services.machine.motion_fault_runtime import MotionFaultRuntime
 from app.services.machine.service import MachineService
 from app.services.machine.operation_service import MachineOperationService
 from app.services.machine.calibration.session_service import CalibrationSessionService
@@ -38,6 +39,7 @@ from app.core.config import settings
 drive_service = DriveService()
 
 machine: Machine | None = None
+motion_fault_runtime: MotionFaultRuntime | None = None
 machine_service: MachineService | None = None
 machine_operation_service: MachineOperationService | None = None
 calibration_session_service: CalibrationSessionService | None = None
@@ -53,6 +55,7 @@ roller_homing_runtime: RollerHomingRuntime | None = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global machine
+    global motion_fault_runtime
     global machine_service
     global machine_operation_service
     global calibration_session_service
@@ -172,12 +175,20 @@ async def lifespan(app: FastAPI):
 
     await calibration_runtime.start()
 
+    if settings.DRIVE_MODE == "real":
+        motion_fault_runtime = MotionFaultRuntime(created_machine)
+        await motion_fault_runtime.start()
+
     if settings.DRIVE_MODE == "fake":
         print("Fake drives initialized")
     else:
         print("RS485 connected")
 
     yield
+
+    if motion_fault_runtime is not None:
+        await motion_fault_runtime.stop()
+        motion_fault_runtime = None
 
     if roller_homing_runtime is not None:
         await roller_homing_runtime.stop()
