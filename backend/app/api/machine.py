@@ -1165,6 +1165,20 @@ def start_roller_home(request: RollerHomeRequest):
     return service.get_status()
 
 
+@router.post("/home/acknowledge-fault")
+def acknowledge_roller_home_fault(operator_confirmed_stopped: bool = False):
+    """Operator acknowledgement after physical E-stop release and VFD RESET.
+
+    This endpoint never resets the drive or starts movement.
+    """
+    service = get_roller_homing_service()
+    try:
+        service.acknowledge_fault(operator_confirmed_stopped=operator_confirmed_stopped)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return service.get_status()
+
+
 @router.post("/home/cancel")
 def cancel_roller_home():
     service = get_roller_homing_service()

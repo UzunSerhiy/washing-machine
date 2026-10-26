@@ -337,6 +337,56 @@ class RollerHomingService:
         # Требуется отдельная процедура восстановления.
 
     @_synchronized
+    def acknowledge_fault(self, *, operator_confirmed_stopped: bool) -> None:
+        """Clear only HOME's software latch; never reset a VFD or command motion.
+
+        Operator must separately release E-stop, use physical RESET, and
+        verify that the roller is mechanically stopped.
+        """
+        if not self._faulted:
+            raise RuntimeError("No HOME fault to acknowledge")
+        if not operator_confirmed_stopped:
+            raise RuntimeError("Operator must confirm the roller is mechanically stopped")
+        if self.searching or self._awaiting_stop:
+            raise RuntimeError("Cannot acknowledge while HOME is active")
+        if self.machine.roller_owner != self.OWNER:
+            raise RuntimeError("HOME does not own the roller")
+        if self._fault_observer is None or self._stop_observer is None:
+            raise RuntimeError("VFD recovery telemetry is not configured")
+
+        # No writes or STOP/RUN commands during acknowledgement.
+        for _ in range(3):
+            try:
+                fault = self._fault_observer()
+                observation = self._stop_observer()
+            except Exception as exc:
+                raise RuntimeError("VFD recovery telemetry unavailable") from exc
+            if type(fault) is not int or fault != 0:
+                raise RuntimeError("VFD fault is not cleared")
+            if not isinstance(observation, StopObservation):
+                raise RuntimeError("Invalid VFD stop observation")
+            if (type(observation.fault) is not int or observation.fault != 0
+                    or type(observation.status) is not int or observation.status != 3
+                    or type(observation.frequency_hz) not in (int, float)
+                    or not math.isfinite(observation.frequency_hz)
+                    or observation.frequency_hz != 0.0
+                    or observation.confirmed is not True):
+                raise RuntimeError("Roller VFD stop is not confirmed")
+
+        # Release ownership before clearing latch: on failure remain faulted.
+        self.machine.release_roller(self.OWNER)
+        self.homing.reset()
+        self._homed = False
+        self._position_turns = 0.0
+        self._faulted = False
+        self._error = None
+        self._fault_code = None
+        self._frequency_hz = None
+        self._last_update_time = None
+        self._home_timing = self._empty_home_timing()
+        self._stop_confirmations = 0
+
+    @_synchronized
     def get_status(self) -> dict:
         return {
             "state": self.homing.state.value,
