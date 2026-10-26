@@ -1,6 +1,6 @@
 import pytest
 
-from app.services.machine.auto.position_loop import AutoPositionLoop
+from app.services.machine.auto.position_loop import AutoPositionLoop, AppliedRollerMotion
 from app.services.machine.auto.stage_controller import AutoStageController
 from app.services.machine.auto.trajectory_plan import AutoGeometry
 from app.services.machine.operation import AutoStage
@@ -87,3 +87,28 @@ def test_movement_after_completion_invalidates_home():
         loop.tick(elapsed_seconds=1, applied_frequency_hz=20,
                   applied_direction=1, sensor=sensor(5))
     assert not loop.position.snapshot.valid
+
+
+def test_applied_motion_sample_uses_actual_frequency_and_direction():
+    loop = make_loop()
+    result = loop.tick_applied_motion(AppliedRollerMotion(
+        elapsed_seconds=1, frequency_hz=25, direction=1, sensor=sensor(),
+    ))
+    assert result.position.position_turns == pytest.approx(9.05 * .5 / 60)
+    assert loop.stage.position_turns == pytest.approx(result.position.position_turns)
+
+
+def test_applied_motion_stopped_interval_does_not_move():
+    loop = make_loop()
+    result = loop.tick_applied_motion(AppliedRollerMotion(
+        elapsed_seconds=1, frequency_hz=0, direction=0, sensor=sensor(),
+    ))
+    assert result.position.position_turns == 0
+
+
+def test_applied_motion_rejects_invalid_direction():
+    loop = make_loop()
+    with pytest.raises(ValueError, match="direction"):
+        loop.tick_applied_motion(AppliedRollerMotion(
+            elapsed_seconds=1, frequency_hz=20, direction=2, sensor=sensor(),
+        ))

@@ -13,6 +13,20 @@ from app.services.machine.sensors.roller_reference import RollerReferenceState
 
 
 @dataclass(frozen=True)
+class AppliedRollerMotion:
+    """Observed inputs for the interval that has already elapsed.
+
+    frequency_hz is the applied (not requested) frequency. Direction is
+    +1 forward, -1 reverse, or 0 stopped. Sensor is a fresh counter reading.
+    """
+
+    elapsed_seconds: float
+    frequency_hz: float
+    direction: int
+    sensor: RollerReferenceState
+
+
+@dataclass(frozen=True)
 class AutoPositionTick:
     position: RollerPositionSnapshot
     next_frequency_hz: float
@@ -28,6 +42,15 @@ class AutoPositionLoop:
             raise ValueError("AUTO stage and position estimator disagree")
         self.position = position
         self.stage = stage
+
+    def tick_applied_motion(self, motion: AppliedRollerMotion) -> AutoPositionTick:
+        """Consume one completed interval; never infer applied Hz from a setpoint."""
+        return self.tick(
+            elapsed_seconds=motion.elapsed_seconds,
+            applied_frequency_hz=motion.frequency_hz,
+            applied_direction=motion.direction,
+            sensor=motion.sensor,
+        )
 
     def tick(self, *, elapsed_seconds: float, applied_frequency_hz: float,
              applied_direction: int, sensor: RollerReferenceState) -> AutoPositionTick:
