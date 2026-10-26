@@ -37,12 +37,14 @@ class RollerHomingService:
         sensor_service: RollerSensorService,
         rotation_calculator: RollerRotationCalculator,
         stop_observer: Callable[[], StopObservation] | None = None,
+        fault_observer: Callable[[], int] | None = None,
     ) -> None:
         self._state_lock = RLock()
         self.machine = machine
         self.rotation_calculator = rotation_calculator
         self.clock = MonotonicClock()
         self._stop_observer = stop_observer
+        self._fault_observer = fault_observer
         self._awaiting_stop = False
         self._stop_deadline: float | None = None
         self._stop_confirmations = 0
@@ -178,6 +180,8 @@ class RollerHomingService:
                 self._poll_stop(now)
                 return
 
+            self._check_active_drive_fault()
+
             if self._last_update_time is None or self._frequency_hz is None:
                 raise RuntimeError("Homing runtime is not initialized")
 
@@ -217,6 +221,18 @@ class RollerHomingService:
                 self._fail_and_stop(str(exc))
             raise
 
+    def _check_active_drive_fault(self) -> None:
+        if self._fault_observer is None:
+            return  # FAKE and legacy callers do not require Modbus telemetry.
+        try:
+            fault = self._fault_observer()
+        except Exception as exc:
+            raise RuntimeError("Roller VFD fault telemetry unavailable") from exc
+        if type(fault) is not int or not 0 <= fault <= 0xFFFF:
+            raise RuntimeError("Roller VFD fault telemetry invalid")
+        if fault != 0:
+            raise RuntimeError(f"Roller VFD fault {fault} during HOME")
+
     def _complete(self) -> None:
         # Command acknowledgement is not proof of a stopped drive.
         self._home_timing["stop_requested_at"] = self.clock.now()
@@ -234,6 +250,8 @@ class RollerHomingService:
         if self._stop_deadline is None or now > self._stop_deadline:
             raise RuntimeError("Roller VFD stop confirmation timeout")
         observation = self._stop_observer()
+        if observation.fault != 0:
+            raise RuntimeError(f"Roller VFD fault {observation.fault} during HOME stop confirmation")
         self._stop_confirmations = self._stop_confirmations + 1 if observation.confirmed else 0
         if self._stop_confirmations >= 3:
             self._home_timing["stop_confirmed_at"] = self.clock.now()
@@ -280,6 +298,10 @@ class RollerHomingService:
     @staticmethod
     def _classify_fault(message: str) -> str:
         normalized = message.lower()
+        if "vfd fault telemetry" in normalized:
+            return "VFD_TELEMETRY_UNAVAILABLE"
+        if "vfd fault " in normalized:
+            return "VFD_FAULT"
         if "stop confirmation timeout" in normalized:
             return "STOP_CONFIRMATION_TIMEOUT"
         if "failed to start homing" in normalized:

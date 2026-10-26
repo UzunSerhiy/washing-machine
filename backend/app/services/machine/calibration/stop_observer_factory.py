@@ -16,3 +16,9 @@ def make_roller_stop_observer(machine: Machine) -> Callable[[], StopObservation]
         return observe_drive_stop(drive)
 
     return observe
+
+
+def make_roller_fault_observer(machine: Machine) -> Callable[[], int]:
+    """Read the physical roller VFD fault register during active HOME."""
+    drive = machine.roller.drive
+    return drive.get_fault
