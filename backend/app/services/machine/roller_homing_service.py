@@ -60,6 +60,7 @@ class RollerHomingService:
         self._homed = False
         self._faulted = False
         self._error: str | None = None
+        self._fault_code: str | None = None
 
     @staticmethod
     def _empty_home_timing() -> dict[str, float | None]:
@@ -149,6 +150,7 @@ class RollerHomingService:
 
         self._homed = False
         self._error = None
+        self._fault_code = None
         self._home_timing = self._empty_home_timing()
         self._position_turns = 0.0
         self._frequency_hz = frequency_hz
@@ -262,6 +264,8 @@ class RollerHomingService:
         except Exception as exc:
             self._faulted = True
             self._error = f"Failed to stop roller: {exc}"
+            self._fault_code = "STOP_COMMAND_FAILED"
+            self.homing._fail(self._error)
             logger.exception(self._error)
             raise
         else:
@@ -273,15 +277,31 @@ class RollerHomingService:
     def invalidate(self) -> None:
         self._homed = False
 
+    @staticmethod
+    def _classify_fault(message: str) -> str:
+        normalized = message.lower()
+        if "stop confirmation timeout" in normalized:
+            return "STOP_CONFIRMATION_TIMEOUT"
+        if "failed to start homing" in normalized:
+            return "START_COMMAND_FAILED"
+        if "homing timeout" in normalized:
+            return "SENSOR_TIMEOUT"
+        if "travel limit" in normalized:
+            return "TRAVEL_LIMIT_EXCEEDED"
+        if "sensor" in normalized or "esp32" in normalized:
+            return "SENSOR_UNAVAILABLE"
+        if "stop" in normalized:
+            return "STOP_CONFIRMATION_FAILED"
+        return "HOMING_RUNTIME_ERROR"
+
     def _fail_and_stop(self, message: str) -> None:
         self._homed = False
         self._awaiting_stop = False
         self._stop_deadline = None
         self._faulted = True
         self._error = message
-
-        if self.searching:
-            self.homing._fail(message)
+        self._fault_code = self._classify_fault(message)
+        self.homing._fail(message)
 
         try:
             self.machine.stop_roller(owner=self.OWNER)
@@ -299,6 +319,7 @@ class RollerHomingService:
         return {
             "state": self.homing.state.value,
             "error": self._error or self.homing.error,
+            "fault_code": self._fault_code,
             "homed": self.homed,
             "faulted": self._faulted,
             "searching": self.searching,
