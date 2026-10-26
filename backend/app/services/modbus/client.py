@@ -1,3 +1,5 @@
+from threading import RLock
+
 from pymodbus.client import ModbusSerialClient
 
 
@@ -8,6 +10,8 @@ class ModbusClient:
         baudrate: int = 9600,
         timeout: float = 1.0,
     ):
+        # Shared by all GAIN drives and the background fault monitor.
+        self._io_lock = RLock()
         self.client = ModbusSerialClient(
             port=port,
             baudrate=baudrate,
@@ -18,21 +22,24 @@ class ModbusClient:
         )
 
     def connect(self) -> bool:
-        return self.client.connect()
+        with self._io_lock:
+            return self.client.connect()
 
     def close(self) -> None:
-        self.client.close()
+        with self._io_lock:
+            self.client.close()
 
     def read_register(
         self,
         address: int,
         device_id: int,
     ) -> int:
-        result = self.client.read_holding_registers(
-            address=address,
-            count=1,
-            device_id=device_id,
-        )
+        with self._io_lock:
+            result = self.client.read_holding_registers(
+                address=address,
+                count=1,
+                device_id=device_id,
+            )
 
         if result.isError():
             raise RuntimeError(
@@ -49,11 +56,12 @@ class ModbusClient:
         value: int,
         device_id: int,
     ) -> None:
-        result = self.client.write_register(
-            address=address,
-            value=value,
-            device_id=device_id,
-        )
+        with self._io_lock:
+            result = self.client.write_register(
+                address=address,
+                value=value,
+                device_id=device_id,
+            )
 
         if result.isError():
             raise RuntimeError(
