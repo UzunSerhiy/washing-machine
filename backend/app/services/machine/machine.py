@@ -154,10 +154,34 @@ class Machine:
                 ("roller", self.roller.drive),
             ))
 
-    def start_brush(self, frequency_hz: float) -> None:
+    def _execute_motion(self, command: Callable[[], None]) -> None:
+        """Latch a failed motion dispatch before best-effort STOP (REAL only).
+
+        Validation and ownership errors are deliberately outside this helper.
+        """
         with self._roller_lock:
             self._check_motion_preflight()
-            self.brush.start(frequency_hz)
+            try:
+                command()
+            except Exception as exc:
+                if not self._enforce_motion_preflight:
+                    raise
+                self._motion_fault_latched = f"Motion command failed: {exc}"
+                if self._motion_fault_store is not None:
+                    try:
+                        self._motion_fault_store.write_latch(self._motion_fault_latched)
+                    except Exception:
+                        # An in-memory latch remains active; never mask original failure.
+                        pass
+                try:
+                    self.stop_all()
+                except Exception:
+                    # STOP is best effort, not evidence of physical standstill.
+                    pass
+                raise
+
+    def start_brush(self, frequency_hz: float) -> None:
+        self._execute_motion(lambda: self.brush.start(frequency_hz))
 
     def stop_brush(self) -> None:
         self.brush.stop()
@@ -170,8 +194,7 @@ class Machine:
     ) -> None:
         with self._roller_lock:
             self._require_roller_access(owner)
-            self._check_motion_preflight()
-            self.roller.forward(frequency_hz)
+            self._execute_motion(lambda: self.roller.forward(frequency_hz))
 
     def start_roller_reverse(
         self,
@@ -181,8 +204,7 @@ class Machine:
     ) -> None:
         with self._roller_lock:
             self._require_roller_access(owner)
-            self._check_motion_preflight()
-            self.roller.reverse(frequency_hz)
+            self._execute_motion(lambda: self.roller.reverse(frequency_hz))
 
     def stop_roller(
         self,
