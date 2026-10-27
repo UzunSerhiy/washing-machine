@@ -149,6 +149,23 @@ class Machine:
             self._motion_fault_latched = None
             self._motion_generation += 1
 
+    def capture_session_generation(self) -> int:
+        """Capture a motion-session epoch; fail closed while a fault is latched."""
+        with self._roller_lock:
+            if self._motion_fault_latched is not None:
+                raise RuntimeError(f"Motion fault latched: {self._motion_fault_latched}")
+            if self._roller_stop_fault or self._external_stop_pending:
+                raise RuntimeError("Motion session blocked by roller STOP state")
+            return self._motion_generation
+
+    def require_session_generation(self, generation: int) -> None:
+        """Validate a session under the same lock used for motion dispatch."""
+        with self._roller_lock:
+            if self._motion_fault_latched is not None:
+                raise RuntimeError(f"Motion fault latched: {self._motion_fault_latched}")
+            if generation != self._motion_generation:
+                raise RuntimeError("Stale motion session: fault/recovery state changed")
+
     def _motion_ticket(self) -> tuple[int, bool]:
         """Capture at command entry, BEFORE waiting for the machine lock.
 
@@ -167,7 +184,7 @@ class Machine:
             ))
 
     def _execute_motion(
-        self, command: Callable[[], None], *, ticket: tuple[int, bool] | None = None
+        self, command: Callable[[], None], *, ticket: tuple[int, bool] | None = None, session_generation: int | None = None
     ) -> None:
         """Latch a failed motion dispatch before best-effort STOP (REAL only).
 
@@ -181,6 +198,8 @@ class Machine:
                 raise RuntimeError(f"Motion fault latched: {self._motion_fault_latched}")
             if ticket[1] or ticket[0] != self._motion_generation:
                 raise RuntimeError("Stale motion command: fault/recovery state changed")
+            if session_generation is not None and session_generation != self._motion_generation:
+                raise RuntimeError("Stale motion session: fault/recovery state changed")
             try:
                 # A failed preflight is itself a machine-level fault in REAL:
                 # persist it and attempt STOP, just like a failed RUN dispatch.
@@ -204,8 +223,8 @@ class Machine:
                     pass
                 raise
 
-    def start_brush(self, frequency_hz: float) -> None:
-        self._execute_motion(lambda: self.brush.start(frequency_hz))
+    def start_brush(self, frequency_hz: float, *, session_generation: int | None = None) -> None:
+        self._execute_motion(lambda: self.brush.start(frequency_hz), session_generation=session_generation)
 
     def stop_brush(self) -> None:
         self.brush.stop()
@@ -215,22 +234,24 @@ class Machine:
         frequency_hz: float,
         *,
         owner: str | None = None,
+        session_generation: int | None = None,
     ) -> None:
         ticket = self._motion_ticket()
         with self._roller_lock:
             self._require_roller_access(owner)
-            self._execute_motion(lambda: self.roller.forward(frequency_hz), ticket=ticket)
+            self._execute_motion(lambda: self.roller.forward(frequency_hz), ticket=ticket, session_generation=session_generation)
 
     def start_roller_reverse(
         self,
         frequency_hz: float,
         *,
         owner: str | None = None,
+        session_generation: int | None = None,
     ) -> None:
         ticket = self._motion_ticket()
         with self._roller_lock:
             self._require_roller_access(owner)
-            self._execute_motion(lambda: self.roller.reverse(frequency_hz), ticket=ticket)
+            self._execute_motion(lambda: self.roller.reverse(frequency_hz), ticket=ticket, session_generation=session_generation)
 
     def stop_roller(
         self,
