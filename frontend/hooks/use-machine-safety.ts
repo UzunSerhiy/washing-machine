@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { evaluateMotionUiDiagnostics } from "@/lib/motion-ui-diagnostics.mjs";
 
 export interface ReadinessSnapshot {
   ready: boolean;
@@ -50,24 +51,5 @@ export function useMotionUiDiagnostics() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const current = now > 0 &&
-    !readiness.isPending && !readiness.isError && !readiness.isFetching &&
-    !fault.isPending && !fault.isError && !fault.isFetching &&
-    readiness.dataUpdatedAt > 0 && fault.dataUpdatedAt > 0 &&
-    now >= readiness.dataUpdatedAt && now >= fault.dataUpdatedAt &&
-    now - readiness.dataUpdatedAt < 3000 && now - fault.dataUpdatedAt < 3000;
-
-  const allowed = current && readiness.data?.ready === true &&
-    readiness.data?.diagnostic_only === true &&
-    fault.data?.latched === false && fault.data?.diagnostic_only === true;
-
-  const reason = fault.data?.latched
-    ? `Аварийная блокировка: ${fault.data.reason ?? "причина неизвестна"}`
-    : !current
-      ? "Нет актуальных диагностических данных от backend"
-      : readiness.data?.ready === false
-        ? `Машина не готова: ${readiness.data.reasons.join(", ") || "нет подтверждения"}`
-        : "Нет подтверждения готовности машины";
-
-  return { allowed, reason };
+  return evaluateMotionUiDiagnostics(now, readiness, fault);
 }
