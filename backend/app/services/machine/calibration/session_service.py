@@ -34,6 +34,7 @@ class CalibrationSessionService:
         self._auto_paused = False
         self.roller_homing_service = None
         self._motion_fault: str | None = None
+        self._session_generation: int | None = None
 
     @property
     def active(self) -> bool:
@@ -49,6 +50,7 @@ class CalibrationSessionService:
             raise RuntimeError("Roller homing service is not configured")
 
         self.roller_homing_service.require_zero()
+        generation = self.machine.capture_session_generation()
 
         self._saved = False
         self._auto_unwinding = False
@@ -62,6 +64,8 @@ class CalibrationSessionService:
             rotation_calculator=self.rotation_calculator,
             material_profile_id=material_profile_id,
         )
+        self._session.player.session_generation = generation
+        self._session_generation = generation
         # Shared HOME has already established the reference position.
         self._session.confirm_zero()
 
@@ -76,7 +80,13 @@ class CalibrationSessionService:
         if self._session is None:
             raise RuntimeError("Calibration session is not active")
 
+        self._require_session_generation()
         return self._session
+
+    def _require_session_generation(self) -> None:
+        if self._session_generation is None:
+            raise RuntimeError("Calibration session has no motion generation")
+        self.machine.require_session_generation(self._session_generation)
 
     @property
     def saved(self) -> bool:
@@ -253,6 +263,7 @@ class CalibrationSessionService:
             return
 
         try:
+            self._require_session_generation()
             self._sync_position()
         finally:
             self._session.player.stop()
@@ -261,6 +272,7 @@ class CalibrationSessionService:
             self._auto_paused = False
             self._last_update_time = None
             self._session = None
+            self._session_generation = None
             self._saved = False
             self._water_reverse_started = False
 
@@ -287,6 +299,7 @@ class CalibrationSessionService:
         if self._session is not None:
             self._session.player.external_motion_fault()
         self._session = None
+        self._session_generation = None
         self._auto_unwinding = False
         self._auto_winding = False
         self._auto_paused = False
@@ -447,6 +460,7 @@ class CalibrationSessionService:
             raise RuntimeError("Cannot finish calibration while roller is running")
 
         self._session = None
+        self._session_generation = None
         self._auto_unwinding = False
         self._auto_winding = False
         self._auto_paused = False

@@ -27,11 +27,28 @@ class FakeClock:
 class FakeMachine:
     def __init__(self):
         self.calls = []
+        self.generation = 0
 
-    def start_roller_forward(self, frequency_hz: float) -> None:
+    def capture_session_generation(self):
+        return self.generation
+
+    def require_session_generation(self, generation):
+        if generation != self.generation:
+            raise RuntimeError("Stale motion session")
+
+    def start_brush(self, frequency_hz, *, session_generation=None):
+        if session_generation is not None:
+            self.require_session_generation(session_generation)
+        self.calls.append(("brush", frequency_hz))
+
+    def start_roller_forward(self, frequency_hz: float, *, session_generation=None) -> None:
+        if session_generation is not None:
+            self.require_session_generation(session_generation)
         self.calls.append(("forward", frequency_hz))
 
-    def start_roller_reverse(self, frequency_hz: float) -> None:
+    def start_roller_reverse(self, frequency_hz: float, *, session_generation=None) -> None:
+        if session_generation is not None:
+            self.require_session_generation(session_generation)
         self.calls.append(("reverse", frequency_hz))
 
     def stop_roller(self) -> None:

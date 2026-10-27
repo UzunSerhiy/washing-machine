@@ -17,6 +17,7 @@ class CalibrationPlayer:
         stage_getter: Callable[[], CalibrationStage] | None = None,
     ):
         self.machine = machine
+        self.session_generation: int | None = None
         self.position_tracker = position_tracker
         self.rotation_calculator = rotation_calculator
         self.calibration_store = calibration_store
@@ -60,7 +61,7 @@ class CalibrationPlayer:
     def start_brush(self, frequency_hz: float) -> None:
         self._validate_frequency(frequency_hz)
 
-        self.machine.start_brush(frequency_hz)
+        self.machine.start_brush(frequency_hz, **({"session_generation": self.session_generation} if self.session_generation is not None else {}))
 
         self._brush_running = True
         self._brush_frequency_hz = frequency_hz
@@ -74,7 +75,7 @@ class CalibrationPlayer:
     def start_jog_forward(self, frequency_hz: float) -> None:
         self._validate_frequency(frequency_hz)
 
-        self.machine.start_roller_forward(frequency_hz)
+        self.machine.start_roller_forward(frequency_hz, **({"session_generation": self.session_generation} if self.session_generation is not None else {}))
 
         self._running = True
         self._paused = False
@@ -84,7 +85,7 @@ class CalibrationPlayer:
     def start_jog_reverse(self, frequency_hz: float) -> None:
         self._validate_frequency(frequency_hz)
 
-        self.machine.start_roller_reverse(frequency_hz)
+        self.machine.start_roller_reverse(frequency_hz, **({"session_generation": self.session_generation} if self.session_generation is not None else {}))
 
         self._running = True
         self._paused = False

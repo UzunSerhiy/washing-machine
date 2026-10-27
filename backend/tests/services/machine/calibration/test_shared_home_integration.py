@@ -10,6 +10,7 @@ from app.services.winding.rotation import RollerRotationCalculator
 
 def make_service(homing=None):
     machine = Mock()
+    machine.capture_session_generation.return_value = 0
     service = CalibrationSessionService(
         machine=machine,
         rotation_calculator=RollerRotationCalculator(
