@@ -1,11 +1,23 @@
+from functools import wraps
+from threading import RLock
+
 from app.services.machine.operation import AutoStage, OperationMode
 from app.services.machine.state import MachineOperationState
 from app.services.speed.layer import SpeedLayer
 from app.services.machine.machine import Machine
 
 
+def _mode_serialized(method):
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._mode_lock:
+            return method(self, *args, **kwargs)
+    return wrapper
+
+
 class MachineOperationService:
     def __init__(self, machine: Machine, speed_layer: SpeedLayer | None = None):
+        self._mode_lock = RLock()
         self.machine = machine
         self.state = MachineOperationState()
         self.speed_layer = speed_layer or SpeedLayer()
@@ -27,6 +39,7 @@ class MachineOperationService:
 
         return self.speed_layer.brush_frequency(speed_percent)
 
+    @_mode_serialized
     def set_manual_mode(self) -> None:
         if (
             self.roller_homing_service is not None
@@ -39,6 +52,7 @@ class MachineOperationService:
         self.state.auto_stage = None
         self.state.material_profile_id = None
 
+    @_mode_serialized
     def set_auto_mode(self, material_profile_id: int) -> None:
         if (
             self.roller_homing_service is not None
@@ -55,6 +69,7 @@ class MachineOperationService:
         self.state.auto_stage = AutoStage.WINDING
         self.state.material_profile_id = material_profile_id
 
+    @_mode_serialized
     def set_calibration_mode(self, material_profile_id: int) -> None:
         if (
             self.roller_homing_service is not None
@@ -71,6 +86,7 @@ class MachineOperationService:
         self.state.auto_stage = None
         self.state.material_profile_id = material_profile_id
 
+    @_mode_serialized
     def next_stage(self) -> None:
         if self.state.mode != OperationMode.AUTO:
             raise RuntimeError("Stage navigation is available only in auto mode")
@@ -88,6 +104,7 @@ class MachineOperationService:
         self.state.running = False
         self.state.paused = False
 
+    @_mode_serialized
     def previous_stage(self) -> None:
         if self.state.mode != OperationMode.AUTO:
             raise RuntimeError("Stage navigation is available only in auto mode")
@@ -104,16 +121,19 @@ class MachineOperationService:
         self.state.running = False
         self.state.paused = False
 
+    @_mode_serialized
     def set_manual_roller_speed(self, speed_percent: float) -> None:
         self._require_manual_mode()
         self._validate_speed_percent(speed_percent)
         self.state.roller_speed_percent = speed_percent
 
+    @_mode_serialized
     def set_manual_brush_speed(self, speed_percent: float) -> None:
         self._require_manual_mode()
         self._validate_speed_percent(speed_percent)
         self.state.brush_speed_percent = speed_percent
 
+    @_mode_serialized
     def start_manual_roller_forward(self) -> None:
         self._require_manual_mode()
         frequency_hz = self.get_manual_roller_frequency()
@@ -126,6 +146,7 @@ class MachineOperationService:
 
         self.state.roller_running = True
 
+    @_mode_serialized
     def start_manual_roller_reverse(self) -> None:
         self._require_manual_mode()
         frequency_hz = self.get_manual_roller_frequency()
@@ -138,6 +159,7 @@ class MachineOperationService:
 
         self.state.roller_running = True
 
+    @_mode_serialized
     def stop_manual_roller(self) -> None:
         self._require_manual_mode()
 
@@ -145,6 +167,7 @@ class MachineOperationService:
 
         self.state.roller_running = False
 
+    @_mode_serialized
     def start_manual_brush(self) -> None:
         self._require_manual_mode()
 
@@ -154,6 +177,7 @@ class MachineOperationService:
 
         self.state.brush_running = True
 
+    @_mode_serialized
     def stop_manual_brush(self) -> None:
         self._require_manual_mode()
 
