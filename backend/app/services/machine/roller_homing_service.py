@@ -63,6 +63,7 @@ class RollerHomingService:
         self._faulted = False
         self._error: str | None = None
         self._fault_code: str | None = None
+        self._session_generation: int | None = None
 
     @staticmethod
     def _empty_home_timing() -> dict[str, float | None]:
@@ -112,13 +113,28 @@ class RollerHomingService:
         if not self.homed:
             raise RuntimeError("Point 0 is not confirmed. Perform homing first.")
 
-    @_synchronized
     def start(
         self,
         *,
         position_confirmed: bool,
         frequency_hz: float = DEFAULT_FREQUENCY_HZ,
     ) -> None:
+        # Capture before waiting for HOME's state lock. A stale queued start
+        # must not acquire a fresh epoch after fault + recovery.
+        generation = (self.machine.capture_session_generation()
+                      if isinstance(self.machine, Machine) else None)
+        with self._state_lock:
+            self._start_locked(position_confirmed=position_confirmed,
+                               frequency_hz=frequency_hz, generation=generation)
+
+    def _require_session_generation(self) -> None:
+        if self._session_generation is not None:
+            self.machine.require_session_generation(self._session_generation)
+
+    def _start_locked(self, *, position_confirmed: bool,
+                      frequency_hz: float, generation: int | None) -> None:
+        if generation is not None:
+            self.machine.require_session_generation(generation)
         if self._faulted:
             raise RuntimeError("Homing fault is latched. Recovery is required.")
 
@@ -150,6 +166,7 @@ class RollerHomingService:
             self.machine.release_roller(self.OWNER)
             raise
 
+        self._session_generation = generation
         self._homed = False
         self._error = None
         self._fault_code = None
@@ -162,6 +179,7 @@ class RollerHomingService:
             self.machine.start_roller_reverse(
                 frequency_hz,
                 owner=self.OWNER,
+                **({"session_generation": generation} if generation is not None else {}),
             )
         except Exception as exc:
             # Команда могла частично выполниться.
@@ -175,6 +193,7 @@ class RollerHomingService:
             return
 
         try:
+            self._require_session_generation()
             now = self.clock.now()
             if self._awaiting_stop:
                 self._poll_stop(now)
@@ -217,6 +236,18 @@ class RollerHomingService:
             self._fail_and_stop(self.homing.error or "Homing failed")
 
         except Exception as exc:
+            if self._session_generation is not None:
+                try:
+                    self._require_session_generation()
+                except RuntimeError:
+                    self._session_generation = None
+                    self._homed = False
+                    self._faulted = True
+                    self._error = "Stale HOME session: fault/recovery state changed"
+                    self._fault_code = "VFD_MONITOR_FAULT"
+                    self._awaiting_stop = False
+                    self.homing._fail(self._error)
+                    raise
             if not self._faulted:
                 self._fail_and_stop(str(exc))
             raise
@@ -234,6 +265,7 @@ class RollerHomingService:
             raise RuntimeError(f"Roller VFD fault {fault} during HOME")
 
     def _complete(self) -> None:
+        self._require_session_generation()
         # Command acknowledgement is not proof of a stopped drive.
         self._home_timing["stop_requested_at"] = self.clock.now()
         self.machine.stop_roller(owner=self.OWNER)
@@ -258,8 +290,10 @@ class RollerHomingService:
             self._finish_stop()
 
     def _finish_stop(self) -> None:
+        self._require_session_generation()
         # This verifies drive telemetry, not absolute mechanical shaft position.
         self._homed = True
+        self._session_generation = None
         self._position_turns = 0.0
         self._last_update_time = None
         self._frequency_hz = None
@@ -276,6 +310,7 @@ class RollerHomingService:
         self._awaiting_stop = False
         self._homed = False
         self.homing.cancel()
+        self._session_generation = None
 
         try:
             self.machine.stop_roller(owner=self.OWNER)
@@ -298,6 +333,7 @@ class RollerHomingService:
         self._homed = False
         self._awaiting_stop = False
         self._stop_deadline = None
+        self._session_generation = None
         self._faulted = True
         self._error = reason
         self._fault_code = "VFD_MONITOR_FAULT"
@@ -336,6 +372,7 @@ class RollerHomingService:
         self._homed = False
         self._awaiting_stop = False
         self._stop_deadline = None
+        self._session_generation = None
         self._faulted = True
         self._error = message
         self._fault_code = self._classify_fault(message)
@@ -392,6 +429,7 @@ class RollerHomingService:
         # Release ownership before clearing latch: on failure remain faulted.
         self.machine.release_roller(self.OWNER)
         self.homing.reset()
+        self._session_generation = None
         self._homed = False
         self._position_turns = 0.0
         self._faulted = False
@@ -417,6 +455,7 @@ class RollerHomingService:
         if owner == self.OWNER:
             self.machine.release_roller(self.OWNER)
         self.homing.reset()
+        self._session_generation = None
         self._homed = False
         self._position_turns = 0.0
         self._faulted = False
