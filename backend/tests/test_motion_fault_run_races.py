@@ -63,8 +63,10 @@ def test_detected_fault_latches_and_blocks_queued_run():
         finally:
             release.set()
         assert 'VFD fault 15' in monitor.result(timeout=3)
-        with pytest.raises(RuntimeError, match='Motion fault latched'):
+        with pytest.raises(RuntimeError, match='Motion fault latched|Roller external STOP notification is pending'):
             motion.result(timeout=3)
+    assert machine.motion_fault_latched is not None
+    assert 'VFD fault 15' in machine.motion_fault_latched
     roller.set_frequency.assert_not_called()
     roller.run_forward.assert_not_called()
 
