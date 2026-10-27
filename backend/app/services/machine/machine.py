@@ -28,6 +28,8 @@ class Machine:
         self._enforce_motion_preflight = enforce_motion_preflight
 
         self._roller_lock = RLock()
+        # Monotonic epoch: commands admitted before a fault/recovery must expire.
+        self._motion_generation = 0
         self._roller_owner: str | None = None
         self._external_stop_pending = 0
         self._roller_stop_fault = False
@@ -48,6 +50,7 @@ class Machine:
         with self._roller_lock:
             if self._motion_fault_latched is None:
                 self._motion_fault_latched = "Motion blocked: backend restarted; operator acknowledgement required"
+            self._motion_generation += 1
             try:
                 self._motion_fault_store.write_latch(self._motion_fault_latched)
             except Exception as exc:
@@ -117,6 +120,7 @@ class Machine:
                 ))
             except Exception as exc:
                 self._motion_fault_latched = str(exc)
+                self._motion_generation += 1
                 if self._motion_fault_store is not None:
                     try:
                         self._motion_fault_store.write_latch(self._motion_fault_latched)
@@ -143,6 +147,14 @@ class Machine:
                 except OSError as exc:
                     raise RuntimeError("Cannot persist motion fault acknowledgement") from exc
             self._motion_fault_latched = None
+            self._motion_generation += 1
+
+    def _motion_ticket(self) -> tuple[int, bool]:
+        """Capture at command entry, BEFORE waiting for the machine lock.
+
+        Python attribute reads rely on the GIL; the locked check is authoritative.
+        """
+        return self._motion_generation, self._motion_fault_latched is not None
 
     def _check_motion_preflight(self) -> None:
         if self._motion_fault_latched is not None:
@@ -154,15 +166,21 @@ class Machine:
                 ("roller", self.roller.drive),
             ))
 
-    def _execute_motion(self, command: Callable[[], None]) -> None:
+    def _execute_motion(
+        self, command: Callable[[], None], *, ticket: tuple[int, bool] | None = None
+    ) -> None:
         """Latch a failed motion dispatch before best-effort STOP (REAL only).
 
         Validation and ownership errors are deliberately outside this helper.
         """
+        if ticket is None:
+            ticket = self._motion_ticket()
         with self._roller_lock:
             # An existing latch is not a new fault; never dispatch or clear it.
             if self._motion_fault_latched is not None:
                 raise RuntimeError(f"Motion fault latched: {self._motion_fault_latched}")
+            if ticket[1] or ticket[0] != self._motion_generation:
+                raise RuntimeError("Stale motion command: fault/recovery state changed")
             try:
                 # A failed preflight is itself a machine-level fault in REAL:
                 # persist it and attempt STOP, just like a failed RUN dispatch.
@@ -172,6 +190,7 @@ class Machine:
                 if not self._enforce_motion_preflight:
                     raise
                 self._motion_fault_latched = f"Motion command failed: {exc}"
+                self._motion_generation += 1
                 if self._motion_fault_store is not None:
                     try:
                         self._motion_fault_store.write_latch(self._motion_fault_latched)
@@ -197,9 +216,10 @@ class Machine:
         *,
         owner: str | None = None,
     ) -> None:
+        ticket = self._motion_ticket()
         with self._roller_lock:
             self._require_roller_access(owner)
-            self._execute_motion(lambda: self.roller.forward(frequency_hz))
+            self._execute_motion(lambda: self.roller.forward(frequency_hz), ticket=ticket)
 
     def start_roller_reverse(
         self,
@@ -207,9 +227,10 @@ class Machine:
         *,
         owner: str | None = None,
     ) -> None:
+        ticket = self._motion_ticket()
         with self._roller_lock:
             self._require_roller_access(owner)
-            self._execute_motion(lambda: self.roller.reverse(frequency_hz))
+            self._execute_motion(lambda: self.roller.reverse(frequency_hz), ticket=ticket)
 
     def stop_roller(
         self,
