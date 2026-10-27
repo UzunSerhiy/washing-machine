@@ -25,6 +25,7 @@ class MotionFaultRuntime:
         self._task: asyncio.Task | None = None
         self.last_fault: str | None = None
         self.last_poll_error: str | None = None
+        self.last_notification_error: str | None = None
 
     @property
     def running(self) -> bool:
@@ -62,6 +63,7 @@ class MotionFaultRuntime:
             self._notified = False
             self.last_fault = None
             self.last_poll_error = None
+            self.last_notification_error = None
             return result
 
     async def _run(self) -> None:
@@ -89,5 +91,6 @@ class MotionFaultRuntime:
                 self._notified = True
                 try:
                     self.on_fault(fault)
-                except Exception:
+                except Exception as exc:
+                    self.last_notification_error = f"{type(exc).__name__}: {exc}"
                     logger.exception("Motion fault session notification failed")

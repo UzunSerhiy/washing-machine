@@ -1195,6 +1195,7 @@ def get_motion_fault_diagnostics():
         "monitor_running": runtime.running if runtime is not None else False,
         "last_poll_error": runtime.last_poll_error if runtime is not None else None,
         "monitor_last_fault": runtime.last_fault if runtime is not None else None,
+        "last_notification_error": getattr(runtime, "last_notification_error", None),
         "recovery_available": recovery_available,
         "recovery_note": ("Acknowledgement endpoint is available; physical RESET, operator confirmation "
                           "and stopped-drive verification are still required" if recovery_available
