@@ -18,6 +18,7 @@ def _mode_serialized(method):
 class MachineOperationService:
     def __init__(self, machine: Machine, speed_layer: SpeedLayer | None = None):
         self._mode_lock = RLock()
+        self._mode_revision = 0
         self.machine = machine
         self.state = MachineOperationState()
         self.speed_layer = speed_layer or SpeedLayer()
@@ -48,6 +49,7 @@ class MachineOperationService:
             raise RuntimeError("Cannot change mode while roller homing is active")
         self._stop_for_mode_change()
 
+        self._mode_revision += 1
         self.state.mode = OperationMode.MANUAL
         self.state.auto_stage = None
         self.state.material_profile_id = None
@@ -65,6 +67,7 @@ class MachineOperationService:
 
         self._stop_for_mode_change()
 
+        self._mode_revision += 1
         self.state.mode = OperationMode.AUTO
         self.state.auto_stage = AutoStage.WINDING
         self.state.material_profile_id = material_profile_id
@@ -82,6 +85,7 @@ class MachineOperationService:
 
         self._stop_for_mode_change()
 
+        self._mode_revision += 1
         self.state.mode = OperationMode.CALIBRATION
         self.state.auto_stage = None
         self.state.material_profile_id = material_profile_id

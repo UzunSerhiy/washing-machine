@@ -1,3 +1,5 @@
+from contextlib import nullcontext
+from functools import wraps
 from dataclasses import dataclass
 
 from app.services.machine.auto.position_loop import AutoPositionLoop
@@ -22,6 +24,15 @@ from app.services.machine.calibration.winding import WindingCalibration
 from app.services.machine.controller.winding import WindingController
 from app.services.winding.rotation import RollerRotationCalculator
 from app.services.speed.layer import SpeedLayer
+
+
+def _serialize_with_mode(method):
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        lock = getattr(self.operation_service, "_mode_lock", None)
+        with lock if lock is not None else nullcontext():
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 @dataclass(frozen=True)
@@ -65,6 +76,7 @@ class AutoSessionService:
         self.drive_diagnostics_service = drive_diagnostics_service
         self._prepared: PreparedAutoStage | None = None
         self._session_generation: int | None = None
+        self._prepared_mode_revision: int | None = None
         self._faulted = False
         self.roller_homing_service = None
         # Reserved for the future position-driven AUTO path. Legacy tick remains active.
@@ -110,6 +122,7 @@ class AutoSessionService:
         if state.material_profile_id is None:
             raise RuntimeError("Material profile is not selected")
 
+        mode_revision = getattr(self.operation_service, "_mode_revision", None)
         motion_machine = self.operation_service.machine
         generation = motion_machine.capture_session_generation()
 
@@ -196,12 +209,22 @@ class AutoSessionService:
             controller=controller,
         )
 
-        motion_machine.require_session_generation(generation)
-        if self._faulted or self._prepared is not None:
-            raise RuntimeError("AUTO preparation was invalidated")
-        prepared.controller.session_generation = generation
-        self._session_generation = generation
-        self._prepared = prepared
+        lock = getattr(self.operation_service, "_mode_lock", None)
+        with lock if lock is not None else nullcontext():
+            motion_machine.require_session_generation(generation)
+            if self._faulted or self._prepared is not None:
+                raise RuntimeError("AUTO preparation was invalidated")
+            if (mode_revision is not None and
+                    mode_revision != self.operation_service._mode_revision):
+                raise RuntimeError("AUTO preparation invalidated by mode transition")
+            if (state.mode != OperationMode.AUTO or
+                    state.auto_stage != prepared.stage or
+                    state.material_profile_id != prepared.material_profile_id):
+                raise RuntimeError("AUTO mode changed during preparation")
+            prepared.controller.session_generation = generation
+            self._session_generation = generation
+            self._prepared_mode_revision = mode_revision
+            self._prepared = prepared
 
         return prepared
 
@@ -211,6 +234,7 @@ class AutoSessionService:
             raise RuntimeError("AUTO session generation is not initialized")
         self.operation_service.machine.require_session_generation(generation)
 
+    @_serialize_with_mode
     def start(self) -> None:
         if self._faulted:
             raise RuntimeError("Cannot start AUTO: controller is in fault state")
@@ -251,6 +275,7 @@ class AutoSessionService:
         state.running = True
         state.paused = False
 
+    @_serialize_with_mode
     def tick(self, elapsed_seconds: float = 0.1) -> None:
         if elapsed_seconds < 0:
             raise ValueError("Elapsed_seconds cannot be negative")
@@ -296,6 +321,7 @@ class AutoSessionService:
             state.running = False
             state.paused = False
 
+    @_serialize_with_mode
     def pause(self) -> None:
         self.require_current_mode()
 
@@ -314,6 +340,7 @@ class AutoSessionService:
         state.running = False
         state.paused = True
 
+    @_serialize_with_mode
     def resume(self) -> None:
         if self._faulted:
             raise RuntimeError("Cannot resume AUTO: controller is in fault state")
@@ -349,6 +376,7 @@ class AutoSessionService:
         state.running = True
         state.paused = False
 
+    @_serialize_with_mode
     def stop(self) -> None:
         state = self.operation_service.state
 
@@ -363,6 +391,7 @@ class AutoSessionService:
             state.paused = False
             self._prepared = None
             self._session_generation = None
+            self._prepared_mode_revision = None
             self._position_loop = None
 
     def reset_fault(self) -> None:
@@ -472,6 +501,10 @@ class AutoSessionService:
             )
 
     def require_current_mode(self) -> None:
+        prepared_revision = getattr(self, "_prepared_mode_revision", None)
+        if (prepared_revision is not None and
+                prepared_revision != getattr(self.operation_service, "_mode_revision", None)):
+            raise RuntimeError("AUTO session invalidated by mode transition")
         if self._prepared is None:
             raise RuntimeError("AUTO session is not prepared")
 
