@@ -6,21 +6,12 @@ import { useState } from "react";
 import { Play, Square, RotateCcw, AlertCircle } from "lucide-react";
 
 import { useMachineOperation } from "@/hooks/use-machine";
-import { useMachineReadiness, useMachineMotionFault } from "@/hooks/use-machine-safety";
+import { useMotionUiDiagnostics } from "@/hooks/use-machine-safety";
 import { useManualControl } from "@/hooks/use-manual-control";
 
 export default function ManualPage() {
-  const { data: operation, isPending, isError, isFetching: operationFetching } = useMachineOperation();
-  const readiness = useMachineReadiness();
-  const fault = useMachineMotionFault();
-  // Diagnostic snapshots are not motion authorization. Missing or updating data
-  // is treated as unknown, not as permission to start.
-  const diagnosticsCurrent = !readiness.isPending && !readiness.isError && !readiness.isFetching &&
-    !fault.isPending && !fault.isError && !fault.isFetching && !operationFetching;
-  const motionUiAllowed = diagnosticsCurrent && readiness.data?.ready === true &&
-    readiness.data?.diagnostic_only === true && fault.data?.latched === false &&
-    fault.data?.diagnostic_only === true;
-
+  const { data: operation, isPending, isError } = useMachineOperation();
+  const { allowed: motionUiAllowed, reason: safetyReason } = useMotionUiDiagnostics();
 
   const { sendCommand, setSpeed, commandPending, speedPending } =
     useManualControl();
@@ -101,11 +92,7 @@ export default function ManualPage() {
 
         {!motionUiAllowed && (
           <div role="alert" className="rounded-lg border border-amber-500 p-4 text-amber-700">
-            Запуск заблокирован в интерфейсе: {fault.data?.latched
-              ? `Аварийная блокировка: ${fault.data.reason ?? "причина неизвестна"}`
-              : readiness.data?.ready === false
-                ? `Машина не готова: ${readiness.data.reasons.join(", ") || "нет подтверждения"}`
-                : "Нет актуальных диагностических данных от backend"}.
+            Запуск заблокирован в интерфейсе: {safetyReason}.
             Это диагностическая индикация, не аппаратная защита.
           </div>
         )}

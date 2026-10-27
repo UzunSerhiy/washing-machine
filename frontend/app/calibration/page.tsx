@@ -1,9 +1,9 @@
 "use client";
 
 import { Point0Dialog } from "@/components/machine/point0-dialog";
-import { useMachineReadiness, useMachineMotionFault } from "@/hooks/use-machine-safety";
+import { useMotionUiDiagnostics } from "@/hooks/use-machine-safety";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import axios from "axios";
 
 import { useMaterialProfiles } from "@/hooks/use-material-profiles";
@@ -70,27 +70,7 @@ export default function CalibrationPage() {
   const [rollerSpeedPercent, setRollerSpeedPercent] = useState(10);
   const [brushSpeedPercent, setBrushSpeedPercent] = useState(30);
   const [error, setError] = useState<string | null>(null);
-  const [diagnosticsNow, setDiagnosticsNow] = useState(0);
-  useEffect(() => {
-    const updateClock = () => setDiagnosticsNow(Date.now());
-    updateClock();
-    const interval = window.setInterval(updateClock, 500);
-    return () => window.clearInterval(interval);
-  }, []);
-  const readiness = useMachineReadiness();
-  const fault = useMachineMotionFault();
-  const diagnosticsCurrent = !readiness.isPending && !readiness.isError && !readiness.isFetching &&
-    !fault.isPending && !fault.isError && !fault.isFetching &&
-    diagnosticsNow > 0 && diagnosticsNow >= readiness.dataUpdatedAt && diagnosticsNow >= fault.dataUpdatedAt &&
-    diagnosticsNow - readiness.dataUpdatedAt < 3000 && diagnosticsNow - fault.dataUpdatedAt < 3000;
-  const motionUiAllowed = diagnosticsCurrent && readiness.data?.ready === true &&
-    readiness.data?.diagnostic_only === true && fault.data?.latched === false &&
-    fault.data?.diagnostic_only === true;
-  const safetyReason = fault.data?.latched
-    ? `Аварийная блокировка: ${fault.data.reason ?? "причина неизвестна"}`
-    : readiness.data?.ready === false
-      ? `Машина не готова: ${readiness.data.reasons.join(", ") || "нет подтверждения"}`
-      : "Нет актуальных диагностических данных от backend";
+  const { allowed: motionUiAllowed, reason: safetyReason } = useMotionUiDiagnostics();
 
   const [message, setMessage] = useState<string | null>(null);
   const [positionConfirmed, setPositionConfirmed] = useState(false);
