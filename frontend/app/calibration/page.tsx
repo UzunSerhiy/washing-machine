@@ -1,8 +1,9 @@
 "use client";
 
 import { Point0Dialog } from "@/components/machine/point0-dialog";
+import { useMachineReadiness, useMachineMotionFault } from "@/hooks/use-machine-safety";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import axios from "axios";
 
 import { useMaterialProfiles } from "@/hooks/use-material-profiles";
@@ -69,6 +70,28 @@ export default function CalibrationPage() {
   const [rollerSpeedPercent, setRollerSpeedPercent] = useState(10);
   const [brushSpeedPercent, setBrushSpeedPercent] = useState(30);
   const [error, setError] = useState<string | null>(null);
+  const [diagnosticsNow, setDiagnosticsNow] = useState(0);
+  useEffect(() => {
+    const updateClock = () => setDiagnosticsNow(Date.now());
+    updateClock();
+    const interval = window.setInterval(updateClock, 500);
+    return () => window.clearInterval(interval);
+  }, []);
+  const readiness = useMachineReadiness();
+  const fault = useMachineMotionFault();
+  const diagnosticsCurrent = !readiness.isPending && !readiness.isError && !readiness.isFetching &&
+    !fault.isPending && !fault.isError && !fault.isFetching &&
+    diagnosticsNow > 0 && diagnosticsNow >= readiness.dataUpdatedAt && diagnosticsNow >= fault.dataUpdatedAt &&
+    diagnosticsNow - readiness.dataUpdatedAt < 3000 && diagnosticsNow - fault.dataUpdatedAt < 3000;
+  const motionUiAllowed = diagnosticsCurrent && readiness.data?.ready === true &&
+    readiness.data?.diagnostic_only === true && fault.data?.latched === false &&
+    fault.data?.diagnostic_only === true;
+  const safetyReason = fault.data?.latched
+    ? `Аварийная блокировка: ${fault.data.reason ?? "причина неизвестна"}`
+    : readiness.data?.ready === false
+      ? `Машина не готова: ${readiness.data.reasons.join(", ") || "нет подтверждения"}`
+      : "Нет актуальных диагностических данных от backend";
+
   const [message, setMessage] = useState<string | null>(null);
   const [positionConfirmed, setPositionConfirmed] = useState(false);
 
@@ -125,7 +148,11 @@ export default function CalibrationPage() {
     session?.stage === "washing_stop" &&
     !session?.saved;
 
-  async function execute(fn: () => Promise<unknown>) {
+  async function execute(fn: () => Promise<unknown>, requiresMotionSafety = true) {
+    if (requiresMotionSafety && !motionUiAllowed) {
+      setError("Команда заблокирована: " + safetyReason);
+      return;
+    }
     setError(null);
     setMessage(null);
 
@@ -179,7 +206,7 @@ export default function CalibrationPage() {
   }
 
   function handleCancel() {
-    execute(() => cancel.mutateAsync());
+    execute(() => cancel.mutateAsync(), false);
   }
 
   const stage = session?.stage;
@@ -198,6 +225,7 @@ export default function CalibrationPage() {
 
   const canJog =
     active &&
+    motionUiAllowed &&
     !homingActive &&
     !busy &&
     [
@@ -344,6 +372,7 @@ export default function CalibrationPage() {
         </p>
       </div>
 
+      {!motionUiAllowed && <div role="alert" className="rounded-lg border border-amber-500 p-4 text-amber-700">Запуск заблокирован в интерфейсе: {safetyReason}. Это диагностическая индикация, не аппаратная защита.</div>}
       <Card>
         <CardHeader>
           <CardTitle>Материал</CardTitle>
@@ -370,7 +399,7 @@ export default function CalibrationPage() {
 
           <Button
             onClick={handleStart}
-            disabled={active || busy || !materialId}
+            disabled={active || busy || !materialId || !motionUiAllowed}
           >
             Начать калибровку
           </Button>
@@ -449,6 +478,7 @@ export default function CalibrationPage() {
               size="lg"
               disabled={
                 !active ||
+                !motionUiAllowed ||
                 busy ||
                 session?.running ||
                 !!session?.saved ||
@@ -507,6 +537,7 @@ export default function CalibrationPage() {
               className="w-full"
               disabled={
                 busy ||
+                !motionUiAllowed ||
                 homingActive ||
                 !!session?.running ||
                 !!session?.brush_running ||
@@ -573,7 +604,7 @@ export default function CalibrationPage() {
             <Button
               variant="outline"
               disabled={!active || busy || !session?.running}
-              onClick={() => execute(() => action.mutateAsync("pause"))}
+              onClick={() => execute(() => action.mutateAsync("pause"), false)}
             >
               Pause
             </Button>
@@ -581,7 +612,7 @@ export default function CalibrationPage() {
             <Button
               variant="destructive"
               disabled={!active || (busy && !homingActive)}
-              onClick={() => execute(() => action.mutateAsync("stop"))}
+              onClick={() => execute(() => action.mutateAsync("stop"), false)}
             >
               Stop
             </Button>
@@ -620,6 +651,7 @@ export default function CalibrationPage() {
               disabled={
                 !active ||
                 busy ||
+                !motionUiAllowed ||
                 homingActive ||
                 brushSpeedPercent <= 0 ||
                 !!session?.saved ||
@@ -642,7 +674,7 @@ export default function CalibrationPage() {
                 !session?.brush_running ||
                 ["water_start", "ready_to_unwind"].includes(stage ?? "")
               }
-              onClick={() => execute(() => stopBrush.mutateAsync())}
+              onClick={() => execute(() => stopBrush.mutateAsync(), false)}
             >
               Остановить щётки
             </Button>
@@ -703,7 +735,7 @@ export default function CalibrationPage() {
         <CardContent className="flex flex-wrap gap-3">
           {session?.saved && stage !== "rewind_complete" && (
             <Button
-              disabled={busy || !!session?.running || !!session?.auto_mode}
+              disabled={busy || !motionUiAllowed || !!session?.running || !!session?.auto_mode}
               onClick={() => execute(() => autoWind.mutateAsync())}
             >
               Автонамотка до Material End (макс. скорость)
@@ -711,7 +743,7 @@ export default function CalibrationPage() {
           )}
           {session?.auto_mode === "paused" && (
             <Button
-              disabled={busy}
+              disabled={busy || !motionUiAllowed}
               onClick={() =>
                 execute(() =>
                   resume.mutateAsync(brushPercentToHz(brushSpeedPercent)),

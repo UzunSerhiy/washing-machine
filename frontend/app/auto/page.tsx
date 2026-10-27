@@ -1,8 +1,9 @@
 "use client";
 
 import { Point0Dialog } from "@/components/machine/point0-dialog";
+import { useMachineReadiness, useMachineMotionFault } from "@/hooks/use-machine-safety";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import axios from "axios";
 
 import {
@@ -42,6 +43,28 @@ function getErrorMessage(error: unknown): string {
 export default function AutoPage() {
   const [materialId, setMaterialId] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [diagnosticsNow, setDiagnosticsNow] = useState(0);
+  useEffect(() => {
+    const updateClock = () => setDiagnosticsNow(Date.now());
+    updateClock();
+    const interval = window.setInterval(updateClock, 500);
+    return () => window.clearInterval(interval);
+  }, []);
+  const readiness = useMachineReadiness();
+  const fault = useMachineMotionFault();
+  const diagnosticsCurrent = !readiness.isPending && !readiness.isError && !readiness.isFetching &&
+    !fault.isPending && !fault.isError && !fault.isFetching &&
+    diagnosticsNow > 0 && diagnosticsNow >= readiness.dataUpdatedAt && diagnosticsNow >= fault.dataUpdatedAt &&
+    diagnosticsNow - readiness.dataUpdatedAt < 3000 && diagnosticsNow - fault.dataUpdatedAt < 3000;
+  const motionUiAllowed = diagnosticsCurrent && readiness.data?.ready === true &&
+    readiness.data?.diagnostic_only === true && fault.data?.latched === false &&
+    fault.data?.diagnostic_only === true;
+  const safetyReason = fault.data?.latched
+    ? `Аварийная блокировка: ${fault.data.reason ?? "причина неизвестна"}`
+    : readiness.data?.ready === false
+      ? `Машина не готова: ${readiness.data.reasons.join(", ") || "нет подтверждения"}`
+      : "Нет актуальных диагностических данных от backend";
+
 
   const { data: session, isLoading, isError } = useAutoSession();
 
@@ -59,6 +82,10 @@ export default function AutoPage() {
 
   async function handleCommand(action: AutoCommand) {
     setError(null);
+    if (action !== "stop" && action !== "pause" && !motionUiAllowed) {
+      setError("Команда заблокирована: " + safetyReason);
+      return;
+    }
 
     try {
       await command.mutateAsync(action);
@@ -103,6 +130,7 @@ export default function AutoPage() {
         <h1 className="text-3xl font-bold">Automatic Control</h1>
         <p className="text-muted-foreground">Winding machine · AUTO mode</p>
       </div>
+      {!motionUiAllowed && <div role="alert" className="rounded-lg border border-amber-500 p-4 text-amber-700">Запуск заблокирован в интерфейсе: {safetyReason}. Это диагностическая индикация, не аппаратная защита.</div>}
       <Card>
         <CardHeader>
           <CardTitle>Material</CardTitle>
@@ -200,14 +228,14 @@ export default function AutoPage() {
         <CardContent>
           <div className="flex flex-wrap items-center gap-3">
             <Button
-              disabled={busy || status !== "IDLE"}
+              disabled={busy || status !== "IDLE" || !motionUiAllowed}
               onClick={() => handleCommand("prepare")}
             >
               Prepare
             </Button>
 
             <Button
-              disabled={busy || status !== "PREPARED"}
+              disabled={busy || status !== "PREPARED" || !motionUiAllowed}
               onClick={() => handleCommand("start")}
             >
               Start
@@ -221,7 +249,7 @@ export default function AutoPage() {
             </Button>
 
             <Button
-              disabled={busy || status !== "PAUSED"}
+              disabled={busy || status !== "PAUSED" || !motionUiAllowed}
               onClick={() => handleCommand("resume")}
             >
               Resume
