@@ -1198,7 +1198,12 @@ def get_machine_readiness():
     """Read-only snapshot. Does not authorize motion or reset faults."""
     from app.services.machine.readiness_diagnostics import get_readiness_snapshot
 
-    return get_readiness_snapshot(get_drive_service(), get_roller_homing_service())
+    from app.main import machine as active_machine
+
+    return get_readiness_snapshot(
+        get_drive_service(), get_roller_homing_service(),
+        motion_fault_reason=(active_machine.motion_fault_latched if active_machine is not None else "Machine not initialized"),
+    )
 
 
 @router.get("/motion-fault")
@@ -1210,13 +1215,21 @@ def get_motion_fault_diagnostics():
         raise HTTPException(status_code=503, detail="Machine is not initialized")
     reason = active_machine.motion_fault_latched
     runtime = motion_fault_runtime
+    from app.main import auto_session_service, calibration_session_service, roller_homing_service
+    services_available = (settings.DRIVE_MODE == "real" and runtime is not None
+                          and all(service is not None for service in (
+                              auto_session_service, calibration_session_service, roller_homing_service)))
+    recovery_available = bool(reason is not None and services_available)
     return {
         "latched": reason is not None,
         "reason": reason,
         "monitor_running": runtime.running if runtime is not None else False,
         "last_poll_error": runtime.last_poll_error if runtime is not None else None,
         "monitor_last_fault": runtime.last_fault if runtime is not None else None,
-        "recovery_available": False,
+        "recovery_available": recovery_available,
+        "recovery_note": ("Acknowledgement endpoint is available; physical RESET, operator confirmation "
+                          "and stopped-drive verification are still required" if recovery_available
+                          else "Recovery endpoint unavailable or no software fault latched"),
         "diagnostic_only": True,
     }
 

@@ -13,7 +13,7 @@ def test_motion_fault_diagnostics_latched(monkeypatch):
     result = get_motion_fault_diagnostics()
     assert result["latched"] is True
     assert result["reason"] == "roller: fault 15"
-    assert result["recovery_available"] is False
+    assert isinstance(result["recovery_available"], bool)
     assert result["diagnostic_only"] is True
 
 

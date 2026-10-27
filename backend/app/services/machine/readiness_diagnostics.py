@@ -3,7 +3,7 @@
 import math
 
 
-def get_readiness_snapshot(drive_service, homing_service):
+def get_readiness_snapshot(drive_service, homing_service, motion_fault_reason=None):
     drives = []
     reasons = []
     for drive_id, config in sorted(drive_service.configs.items()):
@@ -37,6 +37,8 @@ def get_readiness_snapshot(drive_service, homing_service):
         entry["ready"] = not entry["reasons"]
         reasons.extend(f"drive_{drive_id}:{reason}" for reason in entry["reasons"])
         drives.append(entry)
+    if motion_fault_reason is not None:
+        reasons.append("MOTION_FAULT_LATCHED")
     if not drives:
         reasons.append("NO_ENABLED_DRIVES")
     home = homing_service.get_status()
