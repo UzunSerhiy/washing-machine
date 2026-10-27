@@ -1,4 +1,8 @@
 from typing import Protocol
+from contextlib import nullcontext
+from functools import wraps
+
+from app.services.machine.operation import OperationMode
 
 from app.services.machine.calibration.clock import MonotonicClock
 from app.services.machine.calibration.points import CalibrationPoint
@@ -11,6 +15,16 @@ from app.services.machine.sensors.service import RollerSensorService
 
 class Clock(Protocol):
     def now(self) -> float: ...
+
+
+def _mode_serialized(method):
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        operation = getattr(self, "operation_service", None)
+        lock = getattr(operation, "_mode_lock", None)
+        with lock if lock is not None else nullcontext():
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 class CalibrationSessionService:
@@ -35,12 +49,23 @@ class CalibrationSessionService:
         self.roller_homing_service = None
         self._motion_fault: str | None = None
         self._session_generation: int | None = None
+        self.operation_service = None
+        self._session_mode_revision: int | None = None
 
     @property
     def active(self) -> bool:
         return self._session is not None
 
+    def set_operation_service(self, operation_service) -> None:
+        self.operation_service = operation_service
+
+    @_mode_serialized
     def start(self, material_profile_id: int) -> CalibrationSession:
+        if getattr(self, "operation_service", None) is not None:
+            if self.operation_service.state.mode != OperationMode.CALIBRATION:
+                raise RuntimeError("CALIBRATION mode is required")
+            if self.operation_service.state.material_profile_id != material_profile_id:
+                raise RuntimeError("Calibration material profile mismatch")
         if self._motion_fault is not None:
             raise RuntimeError(f"Calibration motion fault latched: {self._motion_fault}")
         if self._session is not None:
@@ -66,6 +91,7 @@ class CalibrationSessionService:
         )
         self._session.player.session_generation = generation
         self._session_generation = generation
+        self._session_mode_revision = (getattr(self.operation_service, "_mode_revision", None))
         # Shared HOME has already established the reference position.
         self._session.confirm_zero()
 
@@ -81,6 +107,11 @@ class CalibrationSessionService:
             raise RuntimeError("Calibration session is not active")
 
         self._require_session_generation()
+        if getattr(self, "operation_service", None) is not None:
+            if self.operation_service.state.mode != OperationMode.CALIBRATION:
+                raise RuntimeError("Calibration session is no longer in CALIBRATION mode")
+            if self._session_mode_revision != self.operation_service._mode_revision:
+                raise RuntimeError("Calibration session belongs to a previous mode revision")
         return self._session
 
     def _require_session_generation(self) -> None:
@@ -128,6 +159,7 @@ class CalibrationSessionService:
             )
         return (None, None)
 
+    @_mode_serialized
     def jog_forward(self, frequency_hz: float) -> None:
         self._ensure_not_homing()
         session = self.get_current()
@@ -149,6 +181,7 @@ class CalibrationSessionService:
         session.player.start_jog_forward(frequency_hz)
         self._last_update_time = self.clock.now()
 
+    @_mode_serialized
     def jog_reverse(
         self, frequency_hz: float, brush_frequency_hz: float | None = None
     ) -> None:
@@ -186,6 +219,7 @@ class CalibrationSessionService:
             session.player.start_jog_reverse(frequency_hz)
         self._last_update_time = self.clock.now()
 
+    @_mode_serialized
     def pause(self) -> None:
         self._ensure_not_homing()
         session = self.get_current()
@@ -213,6 +247,7 @@ class CalibrationSessionService:
         self._auto_winding = False
         self._last_update_time = None
 
+    @_mode_serialized
     def stop(self) -> None:
         session = self.get_current()
 
@@ -225,6 +260,7 @@ class CalibrationSessionService:
             self._auto_paused = False
             self._last_update_time = None
 
+    @_mode_serialized
     def reset_position(self) -> None:
         self._ensure_not_homing()
 
@@ -242,6 +278,7 @@ class CalibrationSessionService:
         session.confirm_zero()
         self._last_update_time = None
 
+    @_mode_serialized
     def mark(
         self, point: CalibrationPoint, brush_frequency_hz: float | None = None
     ) -> None:
@@ -258,6 +295,7 @@ class CalibrationSessionService:
                 )
             self.next_step(50.0, brush_frequency_hz)
 
+    @_mode_serialized
     def cancel(self) -> None:
         if self._session is None:
             return
@@ -276,6 +314,7 @@ class CalibrationSessionService:
             self._saved = False
             self._water_reverse_started = False
 
+    @_mode_serialized
     def complete(self) -> CalibrationSession:
         self._ensure_not_homing()
         session = self.get_current()
@@ -306,6 +345,7 @@ class CalibrationSessionService:
         self._saved = False
         self._last_update_time = None
 
+    @_mode_serialized
     def tick(self) -> None:
         if self._session is None:
             return
@@ -376,6 +416,7 @@ class CalibrationSessionService:
         session.player.update(elapsed)
         self._last_update_time = now
 
+    @_mode_serialized
     def next_step(self, roller_frequency_hz: float, brush_frequency_hz: float) -> None:
         self._ensure_not_homing()
         session = self.get_current()
@@ -407,6 +448,7 @@ class CalibrationSessionService:
             raise RuntimeError("Stop drives before saving")
         self._saved = True
 
+    @_mode_serialized
     def start_auto_wind(self) -> None:
         self._ensure_not_homing()
         session = self.get_current()
@@ -440,6 +482,7 @@ class CalibrationSessionService:
         self._auto_paused = False
         self._last_update_time = self.clock.now()
 
+    @_mode_serialized
     def resume_auto(self, brush_frequency_hz: float) -> None:
         if not self._auto_paused:
             raise RuntimeError("No paused automatic movement")
@@ -453,6 +496,7 @@ class CalibrationSessionService:
         else:
             raise RuntimeError("No automatic movement to resume")
 
+    @_mode_serialized
     def finish(self) -> None:
         session = self.get_current()
 
@@ -467,6 +511,7 @@ class CalibrationSessionService:
         self._saved = False
         self._last_update_time = None
 
+    @_mode_serialized
     def start_brush(self, frequency_hz: float) -> None:
         self._ensure_not_homing()
         session = self.get_current()
@@ -479,6 +524,7 @@ class CalibrationSessionService:
             )
         session.player.start_brush(frequency_hz)
 
+    @_mode_serialized
     def stop_brush(self) -> None:
         session = self.get_current()
         session.player.stop_brush()

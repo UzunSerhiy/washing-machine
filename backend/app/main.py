@@ -160,6 +160,7 @@ async def lifespan(app: FastAPI):
     )
 
     calibration_session_service.set_roller_homing_service(roller_homing_service)
+    calibration_session_service.set_operation_service(machine_operation_service)
 
     auto_session_service.set_roller_homing_service(roller_homing_service)
 

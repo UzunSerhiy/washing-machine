@@ -420,17 +420,11 @@ async def start_calibration(request: CalibrationStartRequest):
 
     operation_service = get_machine_operation_service()
 
-    try:
-        operation_service.set_calibration_mode(
-            request.material_profile_id,
-        )
-    except (ValueError, RuntimeError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
     service = get_calibration_session_service()
-
     try:
-        service.start(request.material_profile_id)
+        with operation_service._mode_lock:
+            operation_service.set_calibration_mode(request.material_profile_id)
+            service.start(request.material_profile_id)
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1125,34 +1119,9 @@ def start_roller_home(request: RollerHomeRequest):
     service = get_roller_homing_service()
     operation = get_machine_operation_service()
 
-    if operation.state.running or operation.state.paused:
-        raise HTTPException(
-            status_code=409,
-            detail="Stop the active operation before homing",
-        )
-
-    # На первом этапе HOME запускается только из MANUAL.
-    # Подтверждённый Point 0 будет общим для остальных режимов.
-    if operation.state.mode != OperationMode.MANUAL:
-        raise HTTPException(
-            status_code=409,
-            detail="Switch to MANUAL mode before homing",
-        )
-
-    if operation.state.roller_running:
-        raise HTTPException(
-            status_code=409,
-            detail="Stop manual roller movement before homing",
-        )
-
-    if operation.state.brush_running:
-        raise HTTPException(
-            status_code=409,
-            detail="Stop brushes before homing",
-        )
-
     try:
-        service.start(
+        operation.start_home(
+            service,
             position_confirmed=request.position_confirmed,
             frequency_hz=request.frequency_hz,
         )

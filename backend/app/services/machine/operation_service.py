@@ -189,6 +189,17 @@ class MachineOperationService:
 
         self.state.brush_running = False
 
+    @_mode_serialized
+    def start_home(self, service, *, position_confirmed: bool, frequency_hz: float) -> None:
+        """Validate mode and start HOME atomically against mode transitions."""
+        if self.state.mode != OperationMode.MANUAL:
+            raise RuntimeError("Switch to MANUAL mode before homing")
+        if self.state.running or self.state.paused:
+            raise RuntimeError("Stop the active operation before homing")
+        if self.state.roller_running or self.state.brush_running:
+            raise RuntimeError("Stop manual movement before homing")
+        service.start(position_confirmed=position_confirmed, frequency_hz=frequency_hz)
+
     def set_roller_homing_service(self, service) -> None:
         self.roller_homing_service = service
 
