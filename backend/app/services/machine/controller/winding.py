@@ -41,6 +41,7 @@ class WindingController:
 
         self._completed = False
         self._stop_applied = False
+        self.session_generation: int | None = None
 
     @property
     def phase(self) -> WindingPhase:
@@ -152,7 +153,10 @@ class WindingController:
 
         if self.action == WindingAction.RUN_FORWARD:
             if self.phase == WindingPhase.BELTS:
-                self.machine.start_roller_forward(belt_frequency_hz)
+                self.machine.start_roller_forward(
+                    belt_frequency_hz,
+                    **({"session_generation": self.session_generation} if self.session_generation is not None else {}),
+                )
                 return
 
             if self.phase == WindingPhase.MATERIAL:
@@ -160,7 +164,10 @@ class WindingController:
 
                 frequency_hz = self.winding_calculator.frequency_hz(speed_percent)
 
-                self.machine.start_roller_forward(frequency_hz)
+                self.machine.start_roller_forward(
+                    frequency_hz,
+                    **({"session_generation": self.session_generation} if self.session_generation is not None else {}),
+                )
                 return
 
         if self.action == WindingAction.STOP:

@@ -64,6 +64,7 @@ class AutoSessionService:
         self.safety_service = safety_service
         self.drive_diagnostics_service = drive_diagnostics_service
         self._prepared: PreparedAutoStage | None = None
+        self._session_generation: int | None = None
         self._faulted = False
         self.roller_homing_service = None
         # Reserved for the future position-driven AUTO path. Legacy tick remains active.
@@ -108,6 +109,9 @@ class AutoSessionService:
 
         if state.material_profile_id is None:
             raise RuntimeError("Material profile is not selected")
+
+        motion_machine = self.operation_service.machine
+        generation = motion_machine.capture_session_generation()
 
         calibration = await self.calibration_repository.load(
             db=session,
@@ -192,15 +196,27 @@ class AutoSessionService:
             controller=controller,
         )
 
+        motion_machine.require_session_generation(generation)
+        if self._faulted or self._prepared is not None:
+            raise RuntimeError("AUTO preparation was invalidated")
+        prepared.controller.session_generation = generation
+        self._session_generation = generation
         self._prepared = prepared
 
         return prepared
+
+    def _require_session_generation(self) -> None:
+        generation = self._session_generation
+        if generation is None or self._prepared is None:
+            raise RuntimeError("AUTO session generation is not initialized")
+        self.operation_service.machine.require_session_generation(generation)
 
     def start(self) -> None:
         if self._faulted:
             raise RuntimeError("Cannot start AUTO: controller is in fault state")
 
         self.require_current_mode()
+        self._require_session_generation()
 
         state = self.operation_service.state
 
@@ -223,6 +239,7 @@ class AutoSessionService:
         belt_frequency_hz = self.speed_layer.belt_frequency(prepared.mode_speed_percent)
 
         try:
+            self._require_session_generation()
             prepared.controller.apply(
                 belt_frequency_hz=belt_frequency_hz,
                 speed_percent=prepared.mode_speed_percent,
@@ -265,6 +282,7 @@ class AutoSessionService:
                 elapsed_seconds=elapsed_seconds,
             )
 
+            self._require_session_generation()
             prepared.controller.apply(
                 belt_frequency_hz=belt_frequency_hz,
                 speed_percent=prepared.mode_speed_percent,
@@ -304,6 +322,7 @@ class AutoSessionService:
 
         if self._prepared is None:
             raise RuntimeError("Auto stage is not prepared")
+        self._require_session_generation()
 
         state = self.operation_service.state
 
@@ -318,6 +337,7 @@ class AutoSessionService:
         belt_frequency_hz = self.speed_layer.belt_frequency(prepared.mode_speed_percent)
 
         try:
+            self._require_session_generation()
             prepared.controller.apply(
                 belt_frequency_hz=belt_frequency_hz,
                 speed_percent=prepared.mode_speed_percent,
@@ -342,6 +362,7 @@ class AutoSessionService:
             state.running = False
             state.paused = False
             self._prepared = None
+            self._session_generation = None
             self._position_loop = None
 
     def reset_fault(self) -> None:

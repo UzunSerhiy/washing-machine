@@ -54,12 +54,33 @@ class FakePhysicalMachine:
     def __init__(self):
         self.start_roller_forward_calls = []
         self.stop_roller_calls = 0
+        self.motion_generation = 0
+        self.motion_fault_latched = False
 
-    def start_roller_forward(self, frequency_hz):
+    def capture_session_generation(self):
+        if self.motion_fault_latched:
+            raise RuntimeError("Motion fault latched")
+        return self.motion_generation
+
+    def require_session_generation(self, generation):
+        if self.motion_fault_latched:
+            raise RuntimeError("Motion fault latched")
+        if generation != self.motion_generation:
+            raise RuntimeError("Stale motion session: fault/recovery state changed")
+
+    def start_roller_forward(self, frequency_hz, *, session_generation=None):
+        if session_generation is not None:
+            self.require_session_generation(session_generation)
         self.start_roller_forward_calls.append(frequency_hz)
 
     def stop_roller(self):
         self.stop_roller_calls += 1
+
+    def simulate_fault_and_recovery(self):
+        self.motion_fault_latched = True
+        self.motion_generation += 1
+        self.motion_fault_latched = False
+        self.motion_generation += 1
 
 
 class FakeOperationService:
@@ -581,7 +602,7 @@ async def test_tick_failure_clears_running_state():
     await service.prepare(object())
     service.start()
 
-    def failing_start_roller_forward(frequency_hz):
+    def failing_start_roller_forward(frequency_hz, *, session_generation=None):
         raise OSError("RS-485 communication failed")
 
     operation_service.machine.start_roller_forward = failing_start_roller_forward
@@ -612,7 +633,7 @@ async def test_start_failure_keeps_machine_stopped():
 
     await service.prepare(object())
 
-    def failing_start_roller_forward(frequency_hz):
+    def failing_start_roller_forward(frequency_hz, *, session_generation=None):
         raise OSError("RS-485 communication failed")
 
     operation_service.machine.start_roller_forward = failing_start_roller_forward
@@ -764,7 +785,7 @@ async def test_start_failure_enters_fault_state():
 
     await service.prepare(object())
 
-    def failing_start_roller_forward(frequency_hz):
+    def failing_start_roller_forward(frequency_hz, *, session_generation=None):
         raise OSError("RS-485 communication failed")
 
     operation_service.machine.start_roller_forward = failing_start_roller_forward
@@ -803,7 +824,7 @@ async def test_resume_failure_enters_fault_state():
 
     assert operation_service.state.paused is True
 
-    def failing_start_roller_forward(frequency_hz):
+    def failing_start_roller_forward(frequency_hz, *, session_generation=None):
         raise OSError("RS-485 communication failed")
 
     operation_service.machine.start_roller_forward = failing_start_roller_forward
