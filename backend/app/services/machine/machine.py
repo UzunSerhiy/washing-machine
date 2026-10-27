@@ -160,8 +160,13 @@ class Machine:
         Validation and ownership errors are deliberately outside this helper.
         """
         with self._roller_lock:
-            self._check_motion_preflight()
+            # An existing latch is not a new fault; never dispatch or clear it.
+            if self._motion_fault_latched is not None:
+                raise RuntimeError(f"Motion fault latched: {self._motion_fault_latched}")
             try:
+                # A failed preflight is itself a machine-level fault in REAL:
+                # persist it and attempt STOP, just like a failed RUN dispatch.
+                self._check_motion_preflight()
                 command()
             except Exception as exc:
                 if not self._enforce_motion_preflight:
