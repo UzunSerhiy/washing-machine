@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getCalibrationSession,
   autoWindCalibration,
+  returnCalibrationToZero,
   resumeCalibration,
   nextCalibrationStep,
   startCalibration,
@@ -13,6 +14,7 @@ import {
   markCalibrationPoint,
   completeCalibration,
   cancelCalibration,
+  finishCalibrationSession,
   startCalibrationBrush,
   stopCalibrationBrush,
   getCalibrationHome,
@@ -90,6 +92,10 @@ export function useCompleteCalibration() {
   return useCalibrationMutation(completeCalibration);
 }
 
+export function useFinishCalibrationSession() {
+  return useCalibrationMutation(finishCalibrationSession);
+}
+
 export function useCancelCalibration() {
   return useCalibrationMutation(cancelCalibration);
 }
@@ -141,4 +147,8 @@ export function useAutoWindCalibration() {
 }
 export function useResumeCalibration() {
   return useCalibrationMutation(resumeCalibration);
+}
+
+export function useReturnCalibrationToZero() {
+  return useCalibrationMutation(returnCalibrationToZero);
 }

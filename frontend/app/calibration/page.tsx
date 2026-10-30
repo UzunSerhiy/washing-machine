@@ -4,7 +4,10 @@ import { Point0Dialog } from "@/components/machine/point0-dialog";
 import { useMotionUiDiagnostics } from "@/hooks/use-machine-safety";
 
 import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
+import { api } from "@/lib/api";
 
 import { useMaterialProfiles } from "@/hooks/use-material-profiles";
 
@@ -19,6 +22,8 @@ import {
   useMarkCalibrationPoint,
   useCompleteCalibration,
   useCancelCalibration,
+  useFinishCalibrationSession,
+  useReturnCalibrationToZero,
   useStartCalibrationBrush,
   useStopCalibrationBrush,
   useCalibrationHome,
@@ -67,6 +72,11 @@ function brushPercentToHz(percent: number): number {
 
 export default function CalibrationPage() {
   const [materialId, setMaterialId] = useState("");
+  const queryClient = useQueryClient();
+  const editRequest = useMutation({
+    mutationFn: async ({ path, payload }: { path: string; payload?: object }) => (await api.post(`/api/machine/calibration/edit/${path}`, payload ?? {})).data,
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["calibration"] }); await queryClient.invalidateQueries({ queryKey: ["calibration-saved"] }); },
+  });
   const [rollerSpeedPercent, setRollerSpeedPercent] = useState(10);
   const [brushSpeedPercent, setBrushSpeedPercent] = useState(30);
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +100,22 @@ export default function CalibrationPage() {
   const mark = useMarkCalibrationPoint();
   const complete = useCompleteCalibration();
   const cancel = useCancelCalibration();
+  const finishSession = useFinishCalibrationSession();
+  const returnToZero = useReturnCalibrationToZero();
 
+  const [newCalibrationConfirmed, setNewCalibrationConfirmed] = useState(false);
+  const savedCalibration = useQuery<{
+    exists: boolean;
+    material_start_turns?: number;
+    material_end_turns?: number;
+    water_start_turns?: number | null;
+    washing_stop_turns?: number;
+  }>({
+    queryKey: ["calibration-saved", materialId],
+    queryFn: async () => (await api.get(`/api/machine/calibration/saved/${materialId}`)).data,
+    enabled: Boolean(materialId) && !sessionQuery.data?.active,
+    retry: false,
+  });
   const session = sessionQuery.data;
   const active = session?.active === true;
   const homingActive = homeQuery.data?.state === "searching";
@@ -102,6 +127,7 @@ export default function CalibrationPage() {
   const saveGeometry = useSaveCalibrationGeometry();
 
   const busy =
+    editRequest.isPending ||
     start.isPending ||
     nextStep.isPending ||
     autoWind.isPending ||
@@ -111,6 +137,8 @@ export default function CalibrationPage() {
     mark.isPending ||
     complete.isPending ||
     cancel.isPending ||
+    finishSession.isPending ||
+    returnToZero.isPending ||
     startBrush.isPending ||
     stopBrush.isPending ||
     startHome.isPending ||
@@ -171,7 +199,7 @@ export default function CalibrationPage() {
         direction,
         frequencyHz,
         brushFrequencyHz:
-          stage === "water_start" && direction === "reverse"
+          ["water_start", "washing_stop"].includes(stage ?? "")
             ? brushPercentToHz(brushSpeedPercent)
             : undefined,
       }),
@@ -216,17 +244,18 @@ export default function CalibrationPage() {
       "washing_stop",
     ].includes(stage ?? "") &&
     !session?.saved &&
+    (!session?.editing || session?.edit_adjusting) &&
     !session?.running &&
     !session?.auto_mode;
 
   const atUpper =
-    stage === "water_start"
+    session?.editing ? session?.material_end_turns : stage === "water_start"
       ? session?.material_end_turns
       : stage === "washing_stop"
         ? session?.material_start_turns
         : null;
   const atLower =
-    stage === "water_start"
+    session?.editing ? 0 : stage === "water_start"
       ? session?.material_start_turns
       : stage === "washing_stop"
         ? 0
@@ -361,7 +390,7 @@ export default function CalibrationPage() {
         <CardContent className="flex flex-wrap items-center gap-3">
           <Select
             value={materialId}
-            onValueChange={(value) => setMaterialId(value ?? "")}
+            onValueChange={(value) => { setMaterialId(value ?? ""); setNewCalibrationConfirmed(false); }}
             disabled={active || busy}
           >
             <SelectTrigger className="w-64">
@@ -379,11 +408,28 @@ export default function CalibrationPage() {
 
           <Button
             onClick={handleStart}
-            disabled={active || busy || !materialId || !motionUiAllowed}
+            disabled={active || busy || !materialId || !motionUiAllowed || savedCalibration.isLoading || (savedCalibration.data?.exists === true && !newCalibrationConfirmed)}
           >
             Начать калибровку
           </Button>
 
+          {!active && savedCalibration.data?.exists && (
+            <div className="w-full rounded-lg border p-4 space-y-3">
+              <p className="font-semibold">Сохранённая калибровка обнаружена</p>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <span>Material Start: {formatTurns(savedCalibration.data.material_start_turns)}</span>
+                <span>Material End: {formatTurns(savedCalibration.data.material_end_turns)}</span>
+                <span>Water Start: {formatTurns(savedCalibration.data.water_start_turns)}</span>
+                <span>Washing Stop: {formatTurns(savedCalibration.data.washing_stop_turns)}</span>
+              </div>
+              <Button disabled={!motionUiAllowed || busy} onClick={() => execute(() => editRequest.mutateAsync({ path: "start", payload: { material_profile_id: Number(materialId) } }))}>Edit Calibration</Button>
+              <p className="text-sm text-muted-foreground">Для редактирования сначала выполните HOME (Point0). Общие точки станка влияют на другие материалы.</p>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={newCalibrationConfirmed} onChange={(event) => setNewCalibrationConfirmed(event.target.checked)} />
+                Подтверждаю начало новой калибровки вместо редактирования
+              </label>
+            </div>
+          )}
           {active && (
             <span className="text-sm text-muted-foreground">
               Активный материал: {session?.material_profile_id}
@@ -391,7 +437,30 @@ export default function CalibrationPage() {
           )}
         </CardContent>
       </Card>
-      <Card>
+      {active && session?.editing && (
+        <Card>
+          <CardHeader><CardTitle>Редактирование сохранённой калибровки</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <p>Текущая позиция: {formatTurns(session.position_turns)} оборотов. Выбранная точка: {session.edit_target ?? "—"}</p>
+            <p className="text-sm text-muted-foreground">Переход к точке со скоростью ползунка ({rollerSpeedPercent}%, {percentToHz(rollerSpeedPercent).toFixed(1)} Гц). Stop доступен во время движения.</p>
+            <div className="flex flex-wrap gap-2">
+              {(["material_start", "material_end", "water_start", "washing_stop"] as const).map(point => (
+                <Button key={point} variant={session.edit_target === point ? "default" : "outline"} disabled={busy || !motionUiAllowed || !!session.running || !!session.edit_adjusting} onClick={() => execute(() => editRequest.mutateAsync({path: "navigate", payload: {point, frequency_hz: percentToHz(rollerSpeedPercent), brush_frequency_hz: brushPercentToHz(brushSpeedPercent)}}))}>{point}</Button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button disabled={busy || !motionUiAllowed || !!session.running || !session.edit_target || !!session.edit_adjusting} onClick={() => execute(() => editRequest.mutateAsync({path: "adjust"}))}>Edit Point</Button>
+              <Button disabled={busy || !session.edit_adjusting || !!session.running} onClick={() => execute(() => editRequest.mutateAsync({path: "point"}))}>Save Point (черновик)</Button>
+              <Button disabled={busy || !motionUiAllowed || !!session.running || !!session.edit_adjusting} onClick={() => execute(async () => {await editRequest.mutateAsync({path: "save"}); setMessage("Калибровка сохранена. Позиция удерживается в сессии. Верните роллер к Point0 перед завершением.");})}>Save Calibration</Button>
+              <Button variant="outline" disabled={busy || !!session.running} onClick={() => execute(async () => { await returnToZero.mutateAsync(); setMessage("Возврат к Point0 запущен. Дождитесь подтверждения датчиком, затем Cancel Editing."); })}>Return to Point0</Button>
+              <Button variant="outline" disabled={busy} onClick={handleCancel}>Cancel Editing</Button>
+              <p className="text-sm text-amber-700">Если роллер не в Point0, Cancel Editing остановит привод, но сохранит позицию и потребует возврата к Point0.</p>
+            </div>
+            <p className="text-sm text-amber-700">Ручная доводка выполняется существующими кнопками Forward / Reverse / Stop ниже. Сначала нажмите Edit Point.</p>
+          </CardContent>
+        </Card>
+      )}
+      {!session?.editing && <Card>
         <CardHeader>
           <CardTitle>Этапы калибровки</CardTitle>
         </CardHeader>
@@ -412,7 +481,7 @@ export default function CalibrationPage() {
             </div>
           ))}
         </CardContent>
-      </Card>
+      </Card>}
       <Card>
         <CardHeader>
           <CardTitle>Положение ролика</CardTitle>
@@ -462,6 +531,7 @@ export default function CalibrationPage() {
                 busy ||
                 session?.running ||
                 !!session?.saved ||
+                !!session?.editing ||
                 stage === "ready_to_unwind" ||
                 stage === "rewind_complete" ||
                 (stage === "water_start" &&
@@ -737,6 +807,23 @@ export default function CalibrationPage() {
             Сохранить калибровку
           </Button>
 
+          <Button
+            variant="secondary"
+            disabled={!active || busy || !motionUiAllowed || !session?.saved || stage !== "rewind_complete" || !!session?.running || !!session?.brush_running || session?.auto_mode != null}
+            onClick={() => execute(() => returnToZero.mutateAsync())}
+          >
+            Авторазмотка до Point0 (с проверкой датчика)
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={!active || busy || !session?.saved || stage !== "rewind_complete" || !!session?.running || !!session?.brush_running || session?.auto_mode != null}
+            onClick={() => execute(async () => {
+              await finishSession.mutateAsync();
+              setMessage("Сессия калибровки завершена. Сохранённые данные не изменены.");
+            }, false)}
+          >
+            Завершить сессию без перемещения
+          </Button>
           <Button
             variant="outline"
             disabled={!active || busy}

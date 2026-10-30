@@ -1,0 +1,1 @@
+Step 32I: Separate MANUAL start prerequisites from diagnostics for speed changes while running. No backend changes. STOP stays available. No automatic reverse while running: stop first. Install: unzip -o <zip> -d . ; cd frontend && npm run lint && npm run build.

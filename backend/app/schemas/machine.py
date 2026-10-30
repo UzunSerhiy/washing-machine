@@ -72,6 +72,9 @@ class CalibrationSessionResponse(BaseModel):
     saved: bool = False
     auto_mode: str | None = None
     water_start_turns: float | None = None
+    editing: bool = False
+    edit_target: str | None = None
+    edit_adjusting: bool = False
 
 
 class CalibrationNextRequest(BaseModel):

@@ -33,7 +33,6 @@ type MachineOperation = {
   paused: boolean;
 };
 
-type SelectableMode = "manual" | "auto" | "calibration";
 
 const ioQueryKey = ["machine", "io", "diagnostics"];
 const modeQueryKey = ["machine", "operation"];
@@ -49,31 +48,6 @@ async function setIOOutput(device: Device, enabled: boolean): Promise<void> {
 
 async function fetchMachineMode(): Promise<MachineOperation> {
   const { data } = await api.get<MachineOperation>("/api/machine/operation");
-  return data;
-}
-
-async function changeMachineMode(
-  mode: SelectableMode,
-  materialProfileId: number | null,
-): Promise<MachineOperation> {
-  if (mode === "manual") {
-    const { data } = await api.post<MachineOperation>(
-      "/api/machine/mode/manual",
-    );
-    return data;
-  }
-
-  if (materialProfileId === null) {
-    throw new Error(
-      "Для AUTO и CALIBRATION необходимо выбрать профиль материала.",
-    );
-  }
-
-  const { data } = await api.post<MachineOperation>(
-    `/api/machine/mode/${mode}`,
-    { material_profile_id: materialProfileId },
-  );
-
   return data;
 }
 
@@ -118,21 +92,6 @@ export function MachineIOControls() {
     },
   });
 
-  const modeCommand = useMutation({
-    mutationFn: (mode: SelectableMode) =>
-      changeMachineMode(mode, modeQuery.data?.material_profile_id ?? null),
-
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: ["machine"],
-      });
-    },
-
-    onError: (err) => {
-      setError(describeError(err));
-    },
-  });
-
   const status = statusQuery.data;
   const operation = modeQuery.data;
 
@@ -141,14 +100,6 @@ export function MachineIOControls() {
     status?.connected === true &&
     status.watchdog_alive === true &&
     status.io_ready === true;
-
-  const modeBusy =
-    modeCommand.isPending ||
-    modeQuery.isLoading ||
-    modeQuery.isError ||
-    !operation ||
-    operation.running ||
-    operation.paused;
 
   function handleToggle(device: Device) {
     if (!available || command.isPending || !status) return;
@@ -161,12 +112,6 @@ export function MachineIOControls() {
     command.mutate({ device, enabled: !enabled });
   }
 
-  function handleModeChange(mode: SelectableMode) {
-    if (modeBusy || operation?.mode === mode) return;
-
-    setError(null);
-    modeCommand.mutate(mode);
-  }
   return (
     <Card>
       <CardHeader>
@@ -188,32 +133,9 @@ export function MachineIOControls() {
             </span>
           </div>
 
-          <div className="grid grid-cols-3 gap-2">
-            {(
-              [
-                { mode: "manual", label: "MANUAL" },
-                { mode: "auto", label: "AUTO" },
-                { mode: "calibration", label: "CALIBRATION" },
-              ] as const
-            ).map(({ mode, label }) => (
-              <Button
-                key={mode}
-                type="button"
-                variant={operation?.mode === mode ? "default" : "outline"}
-                disabled={modeBusy}
-                onClick={() => handleModeChange(mode)}
-                aria-pressed={operation?.mode === mode}
-                className="h-14 px-2 text-xs sm:text-sm"
-              >
-                {label}
-              </Button>
-            ))}
-          </div>
-          {(operation?.running || operation?.paused) && (
-            <p className="text-xs text-muted-foreground">
-              Переключение заблокировано до завершения текущей операции.
-            </p>
-          )}
+          <p className="text-xs text-muted-foreground">
+            Выбор вкладки не запускает рабочую сессию. Запуск и завершение выполняются на странице выбранного режима.
+          </p>
         </div>
 
         <div className="border-t pt-4 space-y-3">

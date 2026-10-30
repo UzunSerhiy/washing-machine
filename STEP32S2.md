@@ -1,0 +1,1 @@
+Edit saved calibration: HOME required. Select point (5Hz automatic motion), Edit Point, Forward/Reverse/Stop, Save Point draft, Save Calibration transaction. Cancel discards draft. Shared machine coordinates affect all materials. No changes to Water Start workflow in new calibrations. Bench test first.

@@ -1,0 +1,9 @@
+# Runtime fault state is persisted on the host, never copied into an image.
+.motion_fault_state.json
+.motion_fault_state.json.*
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.env
+.env.*

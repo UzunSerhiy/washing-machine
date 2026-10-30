@@ -12,6 +12,9 @@ export interface CalibrationSession {
     | null;
 
   saved: boolean;
+  editing?: boolean;
+  edit_target?: string | null;
+  edit_adjusting?: boolean;
   auto_mode: "unwinding" | "winding" | "paused" | null;
   position_turns: number;
   running: boolean;
@@ -49,6 +52,7 @@ export interface CalibrationHomeStatus {
   homed: boolean;
   faulted: boolean;
   searching: boolean;
+  awaiting_stop_confirmation: boolean;
   position_turns: number;
   roller_owner: string | null;
 }

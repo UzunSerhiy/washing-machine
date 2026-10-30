@@ -3,9 +3,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { evaluateMotionUiDiagnostics } from "@/lib/motion-ui-diagnostics.mjs";
+import { evaluateManualMotionDiagnostics, evaluateMotionUiDiagnostics } from "@/lib/motion-ui-diagnostics.mjs";
+
+export interface DriveReadiness {
+  drive_id: number;
+  connected: boolean;
+  status: number | null;
+  frequency_hz: number | null;
+  fault: number | null;
+  reasons: string[];
+}
 
 export interface ReadinessSnapshot {
+  drives: DriveReadiness[];
   ready: boolean;
   reasons: string[];
   diagnostic_only: boolean;
@@ -52,4 +62,18 @@ export function useMotionUiDiagnostics() {
   }, []);
 
   return evaluateMotionUiDiagnostics(now, readiness, fault);
+}
+
+// Command-specific UI hints; backend and physical interlocks remain authoritative.
+export function useManualMotionDiagnostics() {
+  const readiness = useMachineReadiness();
+  const fault = useMachineMotionFault();
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    tick();
+    const timer = window.setInterval(tick, 500);
+    return () => window.clearInterval(timer);
+  }, []);
+  return evaluateManualMotionDiagnostics(now, readiness, fault);
 }

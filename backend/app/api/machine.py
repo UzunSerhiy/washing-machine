@@ -124,6 +124,9 @@ def build_calibration_session_response(
         stage=session.stage,
         saved=service.saved,
         auto_mode=service.auto_mode,
+        editing=service.editing,
+        edit_target=service.edit_target,
+        edit_adjusting=service.edit_adjusting,
     )
 
 
@@ -238,6 +241,50 @@ def get_machine_operation():
         running=state.running,
         paused=state.paused,
     )
+
+
+class ModeSelectionRequest(BaseModel):
+    mode: OperationMode
+
+
+@router.post("/mode/select")
+def select_mode_without_session(request: ModeSelectionRequest):
+    operation = get_machine_operation_service()
+    with operation._mode_lock:
+        if get_calibration_session_service().active:
+            raise HTTPException(status_code=409, detail="Finish CALIBRATION session first")
+        if get_auto_session_service().get_status()["status"] != "IDLE":
+            raise HTTPException(status_code=409, detail="Finish AUTO session first")
+        try:
+            operation.select_idle_mode(request.mode)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"mode": operation.state.mode}
+
+
+@router.get("/manual/session")
+def manual_session_status():
+    return {"active": get_machine_operation_service().manual_session_active}
+
+
+@router.post("/manual/session/start")
+def manual_session_start():
+    operation = get_machine_operation_service()
+    try:
+        operation.begin_manual_session()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"active": True}
+
+
+@router.post("/manual/session/end")
+def manual_session_end():
+    operation = get_machine_operation_service()
+    try:
+        operation.end_manual_session()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"active": False}
 
 
 @router.put(
@@ -414,6 +461,103 @@ def get_calibration():
     return build_calibration_session_response(service)
 
 
+@router.get("/calibration/saved/{material_profile_id}")
+async def get_saved_calibration(material_profile_id: int):
+    """Read-only saved points for selecting a calibration editing workflow."""
+    await get_enabled_material_profile(material_profile_id)
+    async with AsyncSessionLocal() as db:
+        machine = (await db.execute(select(Machine).where(Machine.is_active.is_(True)))).scalars().first()
+        if machine is None:
+            raise HTTPException(status_code=404, detail="Active machine not found")
+        try:
+            data = await CalibrationRepository().load(db, machine.id, material_profile_id)
+        except RuntimeError:
+            return {"exists": False, "material_profile_id": material_profile_id}
+        return {
+            "exists": True,
+            "material_profile_id": material_profile_id,
+            "material_start_turns": data.material_start_turns,
+            "material_end_turns": data.material_end_turns,
+            "water_start_turns": data.water_start_turns,
+            "washing_stop_turns": data.washing_stop_turns,
+        }
+
+
+class EditNavigationRequest(BaseModel):
+    point: str
+    frequency_hz: float = 5.0
+    brush_frequency_hz: float = 15.0
+
+
+@router.post("/calibration/edit/start", response_model=CalibrationSessionResponse)
+async def start_saved_calibration_edit(request: CalibrationStartRequest):
+    await get_enabled_material_profile(request.material_profile_id)
+    operation = get_machine_operation_service()
+    service = get_calibration_session_service()
+    async with AsyncSessionLocal() as db:
+        machine = (await db.execute(select(Machine).where(Machine.is_active.is_(True)))).scalars().first()
+        if machine is None:
+            raise HTTPException(status_code=404, detail="Active machine not found")
+        try:
+            data = await CalibrationRepository().load(db, machine.id, request.material_profile_id)
+            if data.water_start_turns is None:
+                raise ValueError("Saved Water Start is missing")
+            with operation._mode_lock:
+                operation.set_calibration_mode(request.material_profile_id)
+                service.start_edit(request.material_profile_id, data)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return build_calibration_session_response(service)
+
+
+@router.post("/calibration/edit/navigate", response_model=CalibrationSessionResponse)
+def navigate_saved_calibration(request: EditNavigationRequest):
+    from app.services.machine.calibration.points import CalibrationPoint
+    try:
+        point = CalibrationPoint(request.point)
+        get_calibration_session_service().edit_navigate(point, request.frequency_hz, request.brush_frequency_hz)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return build_calibration_session_response(get_calibration_session_service())
+
+
+@router.post("/calibration/edit/adjust", response_model=CalibrationSessionResponse)
+def begin_saved_point_adjustment():
+    service = get_calibration_session_service()
+    try:
+        service.edit_begin_adjust()
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return build_calibration_session_response(service)
+
+
+@router.post("/calibration/edit/point", response_model=CalibrationSessionResponse)
+def save_adjusted_point():
+    service = get_calibration_session_service()
+    try:
+        service.edit_save_point()
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return build_calibration_session_response(service)
+
+
+@router.post("/calibration/edit/save")
+async def commit_saved_calibration_edit():
+    service = get_calibration_session_service()
+    try:
+        session = service.edit_prepare_commit()
+        async with AsyncSessionLocal() as db:
+            machine = (await db.execute(select(Machine).where(Machine.is_active.is_(True)))).scalars().first()
+            if machine is None:
+                raise RuntimeError("Active machine not found")
+            await CalibrationRepository().save(db, machine.id, session)
+            await db.commit()
+        service.edit_mark_committed()
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "saved", "position_preserved": True}
+
+
 @router.post("/calibration/start", response_model=CalibrationSessionResponse)
 async def start_calibration(request: CalibrationStartRequest):
     await get_enabled_material_profile(request.material_profile_id)
@@ -431,11 +575,24 @@ async def start_calibration(request: CalibrationStartRequest):
     return build_calibration_session_response(service)
 
 
+@router.post("/calibration/finish-session")
+def finish_calibration_session():
+    service = get_calibration_session_service()
+    try:
+        service.finish_saved_session()
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "finished"}
+
+
 @router.post("/calibration/cancel")
 def cancel_calibration():
     service = get_calibration_session_service()
 
-    service.cancel()
+    try:
+        service.cancel()
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     operation_service = get_machine_operation_service()
     operation_service.set_manual_mode()
@@ -453,7 +610,7 @@ def calibration_jog_forward(request: CalibrationJogRequest):
     service = get_calibration_session_service()
 
     try:
-        service.jog_forward(request.frequency_hz)
+        service.jog_forward(request.frequency_hz, request.brush_frequency_hz)
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -489,6 +646,16 @@ def calibration_auto_wind():
         service.start_auto_wind()
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return build_calibration_session_response(service)
+
+
+@router.post("/calibration/return-zero", response_model=CalibrationSessionResponse)
+def calibration_return_zero():
+    service = get_calibration_session_service()
+    try:
+        service.start_return_to_zero()
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return build_calibration_session_response(service)
 
 
@@ -1089,6 +1256,8 @@ async def save_calibration_geometry(
                 detail=str(exc),
             ) from exc
 
+    service.mark_geometry_saved()
+
     return {
         "status": "saved",
         "material_profile_id": calibration.material_profile_id,
@@ -1102,6 +1271,62 @@ async def save_calibration_geometry(
 ################################################################
 
 
+class Point0JogRequest(BaseModel):
+    direction: str
+    frequency_hz: float = 5.0
+
+
+_point0_jog_service = None
+
+
+def get_point0_jog_service():
+    global _point0_jog_service
+    from app.services.machine.point0_jog_service import Point0JogService
+    operation = get_machine_operation_service()
+    if _point0_jog_service is None or _point0_jog_service.machine is not operation.machine:
+        _point0_jog_service = Point0JogService(operation.machine)
+    return _point0_jog_service
+
+
+def require_point0_idle_sessions():
+    operation = get_machine_operation_service()
+    if get_calibration_session_service().active:
+        raise RuntimeError('Finish CALIBRATION session before Point0 positioning')
+    if get_auto_session_service().get_status()['status'] != 'IDLE':
+        raise RuntimeError('Finish AUTO session before Point0 positioning')
+    if operation.state.running or operation.state.paused or operation.state.roller_running or operation.state.brush_running:
+        raise RuntimeError('Stop current machine operation before Point0 positioning')
+    home = get_roller_homing_service()
+    if home.searching or home.get_status().get('awaiting_stop_confirmation') or home.faulted:
+        raise RuntimeError('HOME is active or faulted')
+
+
+@router.get('/point0/jog')
+def point0_jog_status():
+    return get_point0_jog_service().status()
+
+
+@router.post('/point0/jog')
+def point0_jog_start(request: Point0JogRequest):
+    operation = get_machine_operation_service()
+    try:
+        with operation._mode_lock:
+            require_point0_idle_sessions()
+            # Any positioning pulse invalidates the previous zero reference.
+            get_roller_homing_service().invalidate()
+            return get_point0_jog_service().start(request.direction, request.frequency_hz)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post('/point0/jog/stop')
+def point0_jog_stop():
+    try:
+        return get_point0_jog_service().stop()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @router.get("/home")
 def get_roller_home():
     service = get_roller_homing_service()
@@ -1110,16 +1335,18 @@ def get_roller_home():
 
 @router.post("/home")
 def start_roller_home(request: RollerHomeRequest):
-    if settings.DRIVE_MODE != "fake":
-        raise HTTPException(
-            status_code=403,
-            detail="Homing is available only in FAKE mode",
-        )
-
     service = get_roller_homing_service()
     operation = get_machine_operation_service()
 
     try:
+        # Selecting AUTO/CALIBRATION is fine; an active work session is not.
+        if get_calibration_session_service().active:
+            raise RuntimeError("Finish CALIBRATION session before Point0 HOME")
+        if get_auto_session_service().get_status()["status"] != "IDLE":
+            raise RuntimeError("Finish AUTO session before Point0 HOME")
+        jog = get_point0_jog_service().status()
+        if jog['active'] or jog['stopping'] or jog['owner'] == 'point0':
+            raise RuntimeError('Finish Point0 positioning and confirm STOP before HOME')
         operation.start_home(
             service,
             position_confirmed=request.position_confirmed,
@@ -1225,6 +1452,8 @@ async def acknowledge_motion_fault(request: MotionFaultAcknowledgeRequest):
         result = await motion_fault_runtime.acknowledge_exclusive(
             recovery, operator_confirmed_stopped=request.operator_confirmed_stopped
         )
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"acknowledged": True, "drives_verified": result.drive_ids,

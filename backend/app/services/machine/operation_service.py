@@ -23,6 +23,42 @@ class MachineOperationService:
         self.state = MachineOperationState()
         self.speed_layer = speed_layer or SpeedLayer()
         self.roller_homing_service = None
+        self.manual_session_active = False
+
+    @_mode_serialized
+    def select_idle_mode(self, mode: OperationMode) -> None:
+        """Select a tab without issuing any motor command."""
+        if self.machine.roller_owner is not None:
+            raise RuntimeError('Roller is reserved by Point0/HOME; finish STOP first')
+        if self.manual_session_active or self.state.running or self.state.paused or self.state.roller_running or self.state.brush_running:
+            raise RuntimeError("Finish the current session and stop all drives first")
+        if self.roller_homing_service is not None and (self.roller_homing_service.searching or self.roller_homing_service.faulted):
+            raise RuntimeError("HOME is active or requires fault acknowledgement")
+        if mode != self.state.mode:
+            self._mode_revision += 1
+            self.state.mode = mode
+            self.state.auto_stage = None
+            self.state.material_profile_id = None
+
+    @_mode_serialized
+    def begin_manual_session(self) -> None:
+        if self.state.mode != OperationMode.MANUAL:
+            raise RuntimeError("Select MANUAL first")
+        if self.manual_session_active:
+            raise RuntimeError("MANUAL session is already active")
+        if self.state.running or self.state.paused or self.state.roller_running or self.state.brush_running:
+            raise RuntimeError("Machine must be stopped")
+        self.manual_session_active = True
+
+    @_mode_serialized
+    def end_manual_session(self) -> None:
+        if not self.manual_session_active:
+            raise RuntimeError("MANUAL session is not active")
+        if self.state.running or self.state.paused or self.state.roller_running or self.state.brush_running:
+            raise RuntimeError("Stop all drives before ending MANUAL session")
+        if self.roller_homing_service is not None and (self.roller_homing_service.searching or self.roller_homing_service.faulted):
+            raise RuntimeError("HOME must finish and any fault must be acknowledged")
+        self.manual_session_active = False
 
     def get_manual_roller_frequency(self) -> float:
         speed_percent = self.state.roller_speed_percent
@@ -192,8 +228,8 @@ class MachineOperationService:
     @_mode_serialized
     def start_home(self, service, *, position_confirmed: bool, frequency_hz: float) -> None:
         """Validate mode and start HOME atomically against mode transitions."""
-        if self.state.mode != OperationMode.MANUAL:
-            raise RuntimeError("Switch to MANUAL mode before homing")
+        # Point0 is a service operation, independent of selected UI mode.
+        # The API additionally checks AUTO/CALIBRATION session ownership.
         if self.state.running or self.state.paused:
             raise RuntimeError("Stop the active operation before homing")
         if self.state.roller_running or self.state.brush_running:
@@ -204,6 +240,8 @@ class MachineOperationService:
         self.roller_homing_service = service
 
     def _stop_for_mode_change(self) -> None:
+        if getattr(self.machine, 'roller_owner', None) is not None:
+            raise RuntimeError('Roller is reserved by Point0/HOME; finish STOP first')
         self.machine.stop_all()
 
         self.state.roller_running = False

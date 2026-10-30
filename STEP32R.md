@@ -1,0 +1,1 @@
+Return to Point0: calculated reverse to 0.5 turns, then 5Hz and fresh ESP32 pulse near zero. STOP/Pause available. Requires patch 32P and 32Q. Verify on equipment at safe low speed before routine use. Python syntax checked; frontend build not run.

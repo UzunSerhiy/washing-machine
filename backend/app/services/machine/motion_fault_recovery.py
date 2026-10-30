@@ -5,6 +5,9 @@ acknowledgement must coordinate all session owners and the polling runtime.
 """
 
 import math
+import logging
+
+logger = logging.getLogger(__name__)
 from dataclasses import dataclass
 
 
@@ -49,12 +52,19 @@ class MotionFaultRecoveryService:
         for sample in range(3):
             for drive_id in expected:
                 drive = drives[drive_id]
-                try:
-                    fault = drive.get_fault()
-                    status = drive.get_status()
-                    frequency = drive.get_frequency()
-                except Exception as exc:
-                    raise RuntimeError(f"Drive {drive_id}: recovery telemetry unavailable") from exc
+                readings = {}
+                for name, getter in (("fault", drive.get_fault),
+                                     ("status", drive.get_status),
+                                     ("frequency", drive.get_frequency)):
+                    logger.info("Recovery sample %d/3 drive %d reading %s", sample + 1, drive_id, name)
+                    try:
+                        readings[name] = getter()
+                    except Exception as exc:
+                        logger.exception("Recovery telemetry failed: drive %d %s", drive_id, name)
+                        raise RuntimeError(
+                            f"Drive {drive_id}: {name} telemetry unavailable"
+                        ) from exc
+                fault, status, frequency = (readings[k] for k in ("fault", "status", "frequency"))
                 if type(fault) is not int or fault != 0:
                     raise RuntimeError(f"Drive {drive_id}: fault not cleared or invalid")
                 if type(status) is not int or status != 3:
@@ -70,8 +80,12 @@ class MotionFaultRecoveryService:
         The machine latch remains in force through verification and cleanup.
         This must be invoked under MotionFaultRuntime's polling exclusion.
         """
+        # The global motion latch remains set during read-only Modbus verification.
+        # Never hold the machine state RLock over 27 potentially slow serial reads.
+        result = self.verify(operator_confirmed_stopped=operator_confirmed_stopped)
         with self.machine._roller_lock:
-            result = self.verify(operator_confirmed_stopped=operator_confirmed_stopped)
+            if self.machine._motion_fault_latched is None:
+                raise RuntimeError("Motion fault latch changed during recovery")
             if self.machine._roller_stop_fault or self.machine._external_stop_pending:
                 raise RuntimeError("Roller STOP fault/pending notification must be resolved separately")
             if self.machine.roller_owner not in (None, self.homing_service.OWNER):

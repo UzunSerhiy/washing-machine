@@ -1,17 +1,21 @@
 "use client";
 
+import { MotionFaultRecovery } from "@/components/machine/motion-fault-recovery";
+import { ManualSessionControl } from "@/components/machine/manual-session-control";
 import { Point0Dialog } from "@/components/machine/point0-dialog";
 
 import { useState } from "react";
 import { Play, Square, RotateCcw, AlertCircle } from "lucide-react";
 
 import { useMachineOperation } from "@/hooks/use-machine";
-import { useMotionUiDiagnostics } from "@/hooks/use-machine-safety";
+import { useManualMotionDiagnostics } from "@/hooks/use-machine-safety";
 import { useManualControl } from "@/hooks/use-manual-control";
 
 export default function ManualPage() {
   const { data: operation, isPending, isError } = useMachineOperation();
-  const { allowed: motionUiAllowed, reason: safetyReason } = useMotionUiDiagnostics();
+  const motion = useManualMotionDiagnostics();
+  const startAllowed = motion.rollerStart.allowed && motion.brushStart.allowed;
+  const safetyReason = [motion.rollerStart, motion.brushStart].find(item => !item.allowed)?.reason;
 
   const { sendCommand, setSpeed, commandPending, speedPending } =
     useManualControl();
@@ -32,8 +36,10 @@ export default function ManualPage() {
       | "brush/stop",
   ) {
     setError(null);
-    if (command !== "roller/stop" && command !== "brush/stop" && !motionUiAllowed) {
-      setError("Запуск запрещён: диагностика недоступна или машина не готова.");
+    const check = command === "roller/forward" || command === "roller/reverse"
+      ? motion.rollerStart : command === "brush/start" ? motion.brushStart : null;
+    if (check && !check.allowed) {
+      setError(`Запуск запрещён: ${check.reason}`);
       return;
     }
 
@@ -53,8 +59,9 @@ export default function ManualPage() {
   }
   async function handleSpeed(drive: "roller" | "brush", speed: number) {
     setError(null);
-    if (!motionUiAllowed) {
-      setError("Изменение скорости недоступно: состояние машины не подтверждено.");
+    const check = drive === "roller" ? motion.rollerSpeed : motion.brushSpeed;
+    if (!check.allowed) {
+      setError(`Изменение скорости недоступно: ${check.reason}`);
       return;
     }
 
@@ -68,9 +75,6 @@ export default function ManualPage() {
   if (isPending) {
     return (
       <main className="p-8">
-        <div className="mb-4">
-          <Point0Dialog />
-        </div>
         Loading machine...
       </main>
     );
@@ -90,9 +94,13 @@ export default function ManualPage() {
           </p>
         </header>
 
-        {!motionUiAllowed && (
+        <ManualSessionControl />
+        <MotionFaultRecovery />
+        <Point0Dialog />
+
+        {!startAllowed && (
           <div role="alert" className="rounded-lg border border-amber-500 p-4 text-amber-700">
-            Запуск заблокирован в интерфейсе: {safetyReason}.
+            Часть команд заблокирована в интерфейсе: {safetyReason}.
             Это диагностическая индикация, не аппаратная защита.
           </div>
         )}
@@ -133,13 +141,13 @@ export default function ManualPage() {
                 max={100}
                 value={rollerSpeed}
                 onChange={(e) => setRollerSpeed(Number(e.target.value))}
-                disabled={!manualMode || busy || !motionUiAllowed}
+                disabled={!manualMode || busy || !motion.rollerSpeed.allowed}
                 className="w-full"
               />
 
               <button
                 onClick={() => handleSpeed("roller", rollerSpeed)}
-                disabled={!manualMode || busy || !motionUiAllowed}
+                disabled={!manualMode || busy || !motion.rollerSpeed.allowed}
                 className="w-full rounded-lg border p-3 disabled:opacity-50"
               >
                 Apply Speed
@@ -149,7 +157,7 @@ export default function ManualPage() {
             <div className="grid grid-cols-3 gap-3">
               <button
                 onClick={() => handleCommand("roller/forward")}
-                disabled={!manualMode || busy || !motionUiAllowed}
+                disabled={!manualMode || busy || !motion.rollerStart.allowed}
                 className="rounded-lg bg-emerald-600 p-3 text-white disabled:opacity-50"
               >
                 <Play className="mx-auto mb-1" />
@@ -158,7 +166,7 @@ export default function ManualPage() {
 
               <button
                 onClick={() => handleCommand("roller/reverse")}
-                disabled={!manualMode || busy || !motionUiAllowed}
+                disabled={!manualMode || busy || !motion.rollerStart.allowed}
                 className="rounded-lg bg-blue-600 p-3 text-white disabled:opacity-50"
               >
                 <RotateCcw className="mx-auto mb-1" />
@@ -195,13 +203,13 @@ export default function ManualPage() {
                 max={100}
                 value={brushSpeed}
                 onChange={(e) => setBrushSpeed(Number(e.target.value))}
-                disabled={!manualMode || busy || !motionUiAllowed}
+                disabled={!manualMode || busy || !motion.brushSpeed.allowed}
                 className="w-full"
               />
 
               <button
                 onClick={() => handleSpeed("brush", brushSpeed)}
-                disabled={!manualMode || busy || !motionUiAllowed}
+                disabled={!manualMode || busy || !motion.brushSpeed.allowed}
                 className="w-full rounded-lg border p-3 disabled:opacity-50"
               >
                 Apply Speed
@@ -211,7 +219,7 @@ export default function ManualPage() {
             <div className="grid grid-cols-2 gap-3">
               <button
                 onClick={() => handleCommand("brush/start")}
-                disabled={!manualMode || busy || !motionUiAllowed}
+                disabled={!manualMode || busy || !motion.brushStart.allowed}
                 className="rounded-lg bg-emerald-600 p-3 text-white disabled:opacity-50"
               >
                 <Play className="mx-auto mb-1" />

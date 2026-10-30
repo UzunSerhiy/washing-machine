@@ -76,6 +76,11 @@ export async function completeCalibration() {
   return response.data;
 }
 
+export async function finishCalibrationSession() {
+  const response = await api.post<{ status: string }>(`${BASE}/finish-session`);
+  return response.data;
+}
+
 export async function cancelCalibration() {
   const response = await api.post<{ status: string }>(`${BASE}/cancel`);
 
@@ -138,5 +143,10 @@ export async function saveCalibrationGeometry(finalDiameterMm: number) {
     final_diameter_mm: finalDiameterMm,
   });
 
+  return response.data;
+}
+
+export async function returnCalibrationToZero() {
+  const response = await api.post<CalibrationSession>(`${BASE}/return-zero`);
   return response.data;
 }
